@@ -1,7 +1,8 @@
 # Ledger Sudoku
 
-
 A premium, ad-free Sudoku desktop app with a clean paper-and-pencil aesthetic.
+
+## ▶ Play it in your browser: https://brutalarmy04.github.io/ledger-sudoku/
 
 ## ⬇️ Download
 
