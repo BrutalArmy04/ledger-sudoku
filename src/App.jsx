@@ -402,6 +402,29 @@ function boardIsComplete(grid) {
 const STORAGE_KEY_STATS = "sudoku_stats_v1";
 const STORAGE_KEY_SETTINGS = "sudoku_settings_v1";
 
+// True when the device's PRIMARY pointer is a finger. Note this is a question
+// about input hardware, not about screen size -- a 1024px tablet is coarse, a
+// 500px-wide desktop window is not. Touch and mouse afford different things
+// (there is no right-click and no hover on a finger), so the interaction model
+// branches on this, while the *layout* branches on width. Two questions, two
+// media features.
+function useCoarsePointer() {
+  const query = "(pointer: coarse)";
+  const [coarse, setCoarse] = useState(
+    () => typeof window !== "undefined" && !!window.matchMedia?.(query).matches
+  );
+
+  useEffect(() => {
+    if (!window.matchMedia) return;
+    const mq = window.matchMedia(query);
+    const onChange = (e) => setCoarse(e.matches);
+    mq.addEventListener("change", onChange);
+    return () => mq.removeEventListener("change", onChange);
+  }, []);
+
+  return coarse;
+}
+
 function useInMemoryStore(initial) {
   const ref = useRef(initial);
   return ref;
@@ -545,6 +568,7 @@ function SudokuApp() {
   const [prefs, setPrefs] = useState(() => loadSettings()?.prefs || { accent: "ink", fontScale: "standard" });
   const T = useMemo(() => buildTheme(themeMode, prefs.accent), [themeMode, prefs.accent]);
   const fontScale = FONT_SCALES[prefs.fontScale]?.multiplier || 1;
+  const coarsePointer = useCoarsePointer();
 
   useEffect(() => {
     saveSettings({ themeMode, prefs });
@@ -707,20 +731,37 @@ function SudokuApp() {
   // arms it (highlighting every cell that already holds it) without touching
   // any cell yet. With a digit armed, left-clicking a board cell places it as
   // the answer; right-clicking places it as a pencil note.
-  const toggleSelectedDigit = useCallback((n) => {
-    setSelectedDigit((d) => (d === n ? null : n));
-  }, []);
+  //
+  // On touch there is a second, cell-first flow (the one every mobile Sudoku
+  // uses): tap a cell to select it, then tap digits to fill it. Without this,
+  // a pad tap could only ever *arm* a digit, so the only way to enter anything
+  // with a finger was arm-then-tap-cell -- which hardcoded `false` for notes,
+  // making pencil marks literally unreachable on a phone.
+  const onPadDigit = useCallback(
+    (n) => {
+      if (coarsePointer && selected && !isGiven(selected[0], selected[1])) {
+        placeNumberAt(selected[0], selected[1], n, mode === "notes");
+        return; // keep the selection: tapping another digit corrects or adds another note
+      }
+      setSelectedDigit((d) => (d === n ? null : n));
+    },
+    [coarsePointer, selected, isGiven, mode, placeNumberAt]
+  );
 
   const handleCellClick = useCallback(
     (r, c) => {
       if (selectedDigit) {
-        const placed = placeNumberAt(r, c, selectedDigit, false);
+        // A finger has no right-click, so on touch the Notes toggle has to
+        // govern the tap path. On a mouse the historical contract is preserved
+        // exactly: left-click always answers, right-click always notes.
+        const asNote = coarsePointer && mode === "notes";
+        const placed = placeNumberAt(r, c, selectedDigit, asNote);
         setSelected(placed ? null : [r, c]);
       } else {
         setSelected([r, c]);
       }
     },
-    [selectedDigit, placeNumberAt]
+    [selectedDigit, placeNumberAt, coarsePointer, mode]
   );
 
   const handleCellRightClick = useCallback(
@@ -856,7 +897,8 @@ function SudokuApp() {
       selected={selected}
       setSelected={setSelected}
       selectedDigit={selectedDigit}
-      toggleSelectedDigit={toggleSelectedDigit}
+      onPadDigit={onPadDigit}
+      coarsePointer={coarsePointer}
       handleCellClick={handleCellClick}
       handleCellRightClick={handleCellRightClick}
       mode={mode}
@@ -1374,7 +1416,7 @@ function GameScreen(props) {
   const {
     T, themeMode, setThemeMode, fontScale = 1,
     grid, notesGrid, selected, setSelected,
-    selectedDigit, toggleSelectedDigit, handleCellClick, handleCellRightClick,
+    selectedDigit, onPadDigit, coarsePointer, handleCellClick, handleCellRightClick,
     mode, setMode, mistakes, hintsLeft, seconds, paused, setPaused, won,
     autoCheck, setAutoCheck, cellState, isGiven,
     placeNumber, clearCell, useHint, handleUndo, canUndo,
@@ -1382,7 +1424,18 @@ function GameScreen(props) {
   } = props;
 
   const fs = (px) => Math.round(px * fontScale);
-  const boardWidth = Math.max(420, Math.round(BOARD_BASE_CELL * fontScale) * 9 + BOARD_CHROME);
+
+  // These are the *ideal* sizes -- exactly the integers the previous code
+  // computed. They are handed to CSS as custom properties rather than applied
+  // as inline pixel values, because an inline value cannot be narrowed by a
+  // media query. The stylesheet passes them through untouched on desktop and
+  // clamps them with min() on a phone. See the header comment in index.css.
+  //
+  // NB: BOARD_CHROME is 18 here but the board's real chrome is 22px (8px
+  // padding x2 + 3px border x2), so the control rows sit 4px narrower than the
+  // board. That is a pre-existing desktop quirk and it is preserved on purpose
+  // -- fixing it would change the PC layout. It is a one-line fix when you want it.
+  const rowWidthIdeal = Math.max(420, Math.round(BOARD_BASE_CELL * fontScale) * 9 + BOARD_CHROME);
 
   const numberCounts = useMemo(() => {
     const counts = Array(10).fill(0);
@@ -1393,18 +1446,25 @@ function GameScreen(props) {
 
   if (!grid) return null;
 
+  const eraseDisabled = !selected || isGiven(selected[0], selected[1]);
+
   return (
     <div
+      className="lsg"
       onClick={() => setSelected(null)}
       style={{
-        minHeight: "100%",
         background: T.bg,
         color: T.text,
         fontFamily: "'Inter', system-ui, sans-serif",
-        display: "flex",
-        flexDirection: "column",
-        alignItems: "center",
-        padding: "20px 16px 32px",
+
+        "--cell-ideal": `${Math.round(BOARD_BASE_CELL * fontScale)}px`,
+        "--digit-fs-ideal": `${fs(31)}px`,
+        "--note-fs-ideal": `${Math.max(9, fs(13))}px`,
+        "--row-w-ideal": `${rowWidthIdeal}px`,
+        "--pad-btn-py-ideal": `${fs(10)}px`,
+        "--pad-fs-ideal": `${fs(18)}px`,
+        "--badge-fs-ideal": `${fs(9)}px`,
+        "--hint-fs-ideal": `${fs(12)}px`,
       }}
     >
       <style>{`
@@ -1412,15 +1472,25 @@ function GameScreen(props) {
         * { box-sizing: border-box; }
         button { font-family: inherit; cursor: pointer; }
         .cell { cursor: pointer; user-select: none; }
-        .numbtn:hover { background: ${T.accentSoft} !important; }
-        .iconbtn:hover { background: ${T.ledger}; }
         .iconbtn:disabled { opacity: 0.35; cursor: default; }
+        .numbtn:disabled { cursor: default; }
+        /* Hover styles are gated on the device actually HAVING hover. Without
+           this, mobile browsers emulate :hover on tap and the style sticks to
+           the last button you touched until you tap somewhere else. */
+        @media (hover: hover) {
+          .numbtn:not(:disabled):hover { background: ${T.accentSoft} !important; }
+          .iconbtn:not(:disabled):hover { background: ${T.ledger}; }
+        }
+        @media (hover: none) {
+          .numbtn:not(:disabled):active { transform: scale(0.94); }
+          .iconbtn:not(:disabled):active { background: ${T.ledger}; }
+        }
         @keyframes flashred { 0%, 100% { background: inherit; } 50% { background: ${T.errorSoft}; } }
         @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
       `}</style>
 
       {/* Top bar */}
-      <div style={{ width: "100%", maxWidth: boardWidth, display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+      <div className="lsg-row lsg-topbar">
         <button onClick={onMenu} className="iconbtn" style={{ background: "transparent", border: "none", color: T.textMuted, fontSize: fs(14), padding: "6px 8px", borderRadius: 6 }}>
           ← Menu
         </button>
@@ -1431,7 +1501,7 @@ function GameScreen(props) {
           <button onClick={onSettings} className="iconbtn" aria-label="Settings" style={{ background: "transparent", border: "none", color: T.textMuted, fontSize: fs(14), padding: "6px 8px", borderRadius: 6 }}>
             ⚙
           </button>
-          <button onClick={() => setThemeMode(themeMode === "light" ? "dark" : "light")} className="iconbtn" style={{ background: "transparent", border: "none", color: T.textMuted, fontSize: fs(14), padding: "6px 8px", borderRadius: 6 }}>
+          <button onClick={() => setThemeMode(themeMode === "light" ? "dark" : "light")} className="iconbtn" aria-label="Toggle theme" style={{ background: "transparent", border: "none", color: T.textMuted, fontSize: fs(14), padding: "6px 8px", borderRadius: 6 }}>
             {themeMode === "light" ? "🌙" : "☀️"}
           </button>
         </div>
@@ -1439,17 +1509,10 @@ function GameScreen(props) {
 
       {/* Status row */}
       <div
+        className="lsg-row lsg-status"
         style={{
-          width: "100%",
-          maxWidth: boardWidth,
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-          marginBottom: 14,
-          padding: "10px 16px",
           background: T.paper,
           border: `1px solid ${T.border}`,
-          borderRadius: 10,
         }}
       >
         <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
@@ -1469,172 +1532,195 @@ function GameScreen(props) {
         </button>
       </div>
 
-      {/* Board */}
-      <div style={{ position: "relative" }}>
-        {paused && !won && (
-          <div
-            style={{
-              position: "absolute",
-              inset: 0,
-              background: themeMode === "light" ? "rgba(247,246,243,0.92)" : "rgba(21,20,15,0.92)",
-              borderRadius: 10,
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              zIndex: 5,
-              flexDirection: "column",
-              gap: 12,
-            }}
-          >
-            <div style={{ fontSize: fs(18), fontWeight: 600 }}>Paused</div>
-            <button
-              onClick={() => setPaused(false)}
-              style={{ background: T.accent, color: "#fff", border: "none", borderRadius: 8, padding: "10px 22px", fontWeight: 600, fontSize: fs(14) }}
-            >
-              Resume
-            </button>
-          </div>
-        )}
-        {won && (
-          <div
-            style={{
-              position: "absolute",
-              inset: 0,
-              background: themeMode === "light" ? "rgba(247,246,243,0.96)" : "rgba(21,20,15,0.96)",
-              borderRadius: 10,
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              zIndex: 5,
-              flexDirection: "column",
-              gap: 10,
-              textAlign: "center",
-              padding: 20,
-            }}
-          >
-            <div style={{ fontSize: fs(24), fontWeight: 700, color: T.accent }}>Solved</div>
-            <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: fs(18) }}>{formatTime(seconds)}</div>
-            <div style={{ fontSize: fs(13), color: T.textMuted }}>{mistakes} mistake{mistakes === 1 ? "" : "s"} · {difficulty}</div>
-            <button
-              onClick={onNewGame}
-              style={{ marginTop: 8, background: T.accent, color: "#fff", border: "none", borderRadius: 8, padding: "10px 24px", fontWeight: 600, fontSize: fs(14) }}
-            >
-              New puzzle
-            </button>
-          </div>
-        )}
-
-        <Board
-          T={T}
-          grid={grid}
-          notesGrid={notesGrid}
-          onCellClick={handleCellClick}
-          onCellRightClick={handleCellRightClick}
-          cellState={cellState}
-          isGiven={isGiven}
-          themeMode={themeMode}
-          fontScale={fontScale}
-        />
-      </div>
-
-      {/* Tool tray */}
-      <div style={{ width: "100%", maxWidth: boardWidth, display: "flex", justifyContent: "space-around", marginTop: 16 }}>
-        <ToolButton T={T} fontScale={fontScale} label="Undo" onClick={handleUndo} disabled={!canUndo} icon="↺" />
-        <ToolButton
-          T={T}
-          fontScale={fontScale}
-          label={mode === "notes" ? "Notes ✓" : "Notes"}
-          title="Toggles note vs. answer for keyboard number keys (1-9). Mouse: pick a number on the pad, then left-click a cell for an answer or right-click for a note."
-          onClick={() => setMode((m) => (m === "notes" ? "normal" : "notes"))}
-          active={mode === "notes"}
-          icon="✎"
-        />
-        <ToolButton T={T} fontScale={fontScale} label="Erase" onClick={clearCell} disabled={!selected || isGiven(selected[0], selected[1])} icon="⌫" />
-        <ToolButton T={T} fontScale={fontScale} label={`Hint (${hintsLeft})`} onClick={useHint} disabled={hintsLeft <= 0 || !selected} icon="✺" />
-      </div>
-
-      {/* Number pad */}
-      <div style={{ width: "100%", maxWidth: boardWidth, display: "grid", gridTemplateColumns: "repeat(9, 1fr)", gap: 6, marginTop: 14 }}>
-        {Array.from({ length: 9 }, (_, i) => i + 1).map((n) => {
-          const remaining = 9 - numberCounts[n];
-          const armed = selectedDigit === n;
-          return (
-            <button
-              key={n}
-              className="numbtn"
-              disabled={remaining <= 0}
-              onClick={(e) => {
-                e.stopPropagation();
-                toggleSelectedDigit(n);
-              }}
+      {/* Board. The wrapper is the flex/grid cell that owns the leftover space;
+          the stage is what the board and its overlays actually sit in. */}
+      <div className="lsg-boardwrap">
+        <div className="lsg-boardstage">
+          {paused && !won && (
+            <div
               style={{
-                position: "relative",
-                background: armed ? T.accent : T.paper,
-                border: `1px solid ${armed ? T.accent : T.border}`,
-                borderRadius: 8,
-                padding: `${Math.round(10 * fontScale)}px 0`,
-                fontSize: Math.round(18 * fontScale),
-                fontFamily: "'JetBrains Mono', monospace",
-                fontWeight: 700,
-                color: armed ? "#fff" : remaining <= 0 ? T.textMuted : T.text,
-                opacity: remaining <= 0 ? 0.3 : 1,
-                transition: "background 0.12s, border-color 0.12s",
+                position: "absolute",
+                inset: 0,
+                background: themeMode === "light" ? "rgba(247,246,243,0.92)" : "rgba(21,20,15,0.92)",
+                borderRadius: 10,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                zIndex: 5,
+                flexDirection: "column",
+                gap: 12,
               }}
             >
-              {n}
-              {remaining > 0 && (
-                <span
-                  style={{
-                    position: "absolute",
-                    top: 2,
-                    right: 4,
-                    fontSize: fs(9),
-                    fontWeight: 600,
-                    color: armed ? "#fff" : T.textMuted,
-                    opacity: armed ? 0.85 : 0.7,
-                  }}
-                >
-                  {remaining}
-                </span>
-              )}
-            </button>
-          );
-        })}
+              <div style={{ fontSize: fs(18), fontWeight: 600 }}>Paused</div>
+              <button
+                onClick={() => setPaused(false)}
+                style={{ background: T.accent, color: "#fff", border: "none", borderRadius: 8, padding: "10px 22px", fontWeight: 600, fontSize: fs(14) }}
+              >
+                Resume
+              </button>
+            </div>
+          )}
+          {won && (
+            <div
+              style={{
+                position: "absolute",
+                inset: 0,
+                background: themeMode === "light" ? "rgba(247,246,243,0.96)" : "rgba(21,20,15,0.96)",
+                borderRadius: 10,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                zIndex: 5,
+                flexDirection: "column",
+                gap: 10,
+                textAlign: "center",
+                padding: 20,
+              }}
+            >
+              <div style={{ fontSize: fs(24), fontWeight: 700, color: T.accent }}>Solved</div>
+              <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: fs(18) }}>{formatTime(seconds)}</div>
+              <div style={{ fontSize: fs(13), color: T.textMuted }}>{mistakes} mistake{mistakes === 1 ? "" : "s"} · {difficulty}</div>
+              <button
+                onClick={onNewGame}
+                style={{ marginTop: 8, background: T.accent, color: "#fff", border: "none", borderRadius: 8, padding: "10px 24px", fontWeight: 600, fontSize: fs(14) }}
+              >
+                New puzzle
+              </button>
+            </div>
+          )}
+
+          <Board
+            T={T}
+            grid={grid}
+            notesGrid={notesGrid}
+            onCellClick={handleCellClick}
+            onCellRightClick={handleCellRightClick}
+            cellState={cellState}
+            isGiven={isGiven}
+            themeMode={themeMode}
+          />
+        </div>
       </div>
 
-      {/* Control hint */}
-      <div style={{ fontSize: fs(12), color: T.textMuted, marginTop: 10, textAlign: "center" }}>
-        Click a number, then left-click a cell for an answer · right-click for a note
-      </div>
+      {/* Everything below the board. Grouped so the landscape layout can move
+          it into a right-hand column with a single grid-area, without
+          reordering the DOM (which would wreck the tab order). */}
+      <div className="lsg-controls">
+        {/* Tool tray. On touch we stop the click bubbling to the root's
+            "deselect" handler -- otherwise tapping Notes would immediately
+            clear the cell you were about to annotate. On a mouse the click
+            still bubbles, exactly as before. */}
+        <div
+          className="lsg-row lsg-tools"
+          onClick={(e) => { if (coarsePointer) e.stopPropagation(); }}
+        >
+          <ToolButton T={T} fontScale={fontScale} label="Undo" onClick={handleUndo} disabled={!canUndo} icon="↺" />
+          <ToolButton
+            T={T}
+            fontScale={fontScale}
+            label={mode === "notes" ? "Notes ✓" : "Notes"}
+            title="Toggles note vs. answer. Touch: tap ✎, then tap digits to pencil them in. Mouse: pick a number on the pad, then left-click a cell for an answer or right-click for a note."
+            onClick={() => setMode((m) => (m === "notes" ? "normal" : "notes"))}
+            active={mode === "notes"}
+            icon="✎"
+          />
+          <ToolButton className="lsg-tool-erase" T={T} fontScale={fontScale} label="Erase" onClick={clearCell} disabled={eraseDisabled} icon="⌫" />
+          <ToolButton T={T} fontScale={fontScale} label={`Hint (${hintsLeft})`} onClick={useHint} disabled={hintsLeft <= 0 || !selected} icon="✺" />
+        </div>
 
-      {/* Auto-check toggle */}
-      <label style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 18, fontSize: fs(13), color: T.textMuted, cursor: "pointer" }}>
-        <input type="checkbox" checked={autoCheck} onChange={(e) => setAutoCheck(e.target.checked)} />
-        Highlight mistakes as I go
-      </label>
+        {/* Number pad. 9 across on desktop; 5x2 on a phone, where 9 across
+            would give ~33px targets. The 10th slot becomes Erase. */}
+        <div className="lsg-row lsg-pad">
+          {Array.from({ length: 9 }, (_, i) => i + 1).map((n) => {
+            const remaining = 9 - numberCounts[n];
+            const armed = selectedDigit === n;
+            return (
+              <button
+                key={n}
+                className="numbtn"
+                disabled={remaining <= 0}
+                aria-label={`Digit ${n}`}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onPadDigit(n);
+                }}
+                style={{
+                  background: armed ? T.accent : T.paper,
+                  border: `1px solid ${armed ? T.accent : T.border}`,
+                  color: armed ? "#fff" : remaining <= 0 ? T.textMuted : T.text,
+                  opacity: remaining <= 0 ? 0.3 : 1,
+                }}
+              >
+                {n}
+                {remaining > 0 && (
+                  <span
+                    className="numbtn-badge"
+                    style={{
+                      color: armed ? "#fff" : T.textMuted,
+                      opacity: armed ? 0.85 : 0.7,
+                    }}
+                  >
+                    {remaining}
+                  </span>
+                )}
+              </button>
+            );
+          })}
+
+          <button
+            className="numbtn lsg-pad-erase"
+            disabled={eraseDisabled}
+            aria-label="Erase"
+            onClick={(e) => {
+              e.stopPropagation();
+              clearCell();
+            }}
+            style={{
+              background: T.paper,
+              border: `1px solid ${T.border}`,
+              color: T.text,
+              opacity: eraseDisabled ? 0.3 : 1,
+            }}
+          >
+            ⌫
+          </button>
+        </div>
+
+        {/* Control hint */}
+        <div className="lsg-hint" style={{ color: T.textMuted }}>
+          <span className="lsg-hint-fine">
+            Click a number, then left-click a cell for an answer · right-click for a note
+          </span>
+          <span className="lsg-hint-coarse">
+            Tap a cell, then a number · ✎ Notes for pencil marks
+          </span>
+        </div>
+
+        {/* Auto-check toggle */}
+        <label
+          className="lsg-autocheck"
+          style={{ fontSize: fs(13), color: T.textMuted }}
+          onClick={(e) => { if (coarsePointer) e.stopPropagation(); }}
+        >
+          <input type="checkbox" checked={autoCheck} onChange={(e) => setAutoCheck(e.target.checked)} />
+          Highlight mistakes as I go
+        </label>
+      </div>
     </div>
   );
 }
 
-function ToolButton({ T, fontScale = 1, label, onClick, disabled, active, icon, title }) {
+function ToolButton({ T, fontScale = 1, label, onClick, disabled, active, icon, title, className = "" }) {
   const fs = (px) => Math.round(px * fontScale);
   return (
     <button
-      className="iconbtn"
+      className={`iconbtn toolbtn ${className}`.trim()}
       onClick={onClick}
       disabled={disabled}
       title={title}
       style={{
-        display: "flex",
-        flexDirection: "column",
-        alignItems: "center",
-        gap: 3,
         background: active ? T.accentSoft : "transparent",
-        border: "none",
-        borderRadius: 8,
-        padding: "8px 10px",
         color: active ? T.accent : T.text,
-        minWidth: 64,
       }}
     >
       <span style={{ fontSize: fs(18) }}>{icon}</span>
@@ -1645,14 +1731,16 @@ function ToolButton({ T, fontScale = 1, label, onClick, disabled, active, icon, 
 
 /* ============================================================
    BOARD + CELL
+
+   All geometry now comes from the single CSS custom property --cell, declared
+   on .lsg-boardstage. The grid columns, the cell boxes, the digit size, the
+   note size and the ruled-paper gradient all read the same length, so they
+   cannot drift out of alignment -- which is precisely why the cells stay at an
+   explicit width instead of the more obvious `1fr`: a fractional column has no
+   value the background-gradient's repeat period could be tied to.
    ============================================================ */
 
-function Board({ T, grid, notesGrid, onCellClick, onCellRightClick, cellState, isGiven, themeMode, fontScale = 1 }) {
-  const cellSize = Math.round(BOARD_BASE_CELL * fontScale);
-  const boardPx = cellSize * 9;
-  const digitFontSize = Math.round(31 * fontScale);
-  const noteFontSize = Math.max(9, Math.round(13 * fontScale));
-
+function Board({ T, grid, notesGrid, onCellClick, onCellRightClick, cellState, isGiven, themeMode }) {
   return (
     <div
       style={{
@@ -1666,13 +1754,13 @@ function Board({ T, grid, notesGrid, onCellClick, onCellRightClick, cellState, i
       <div
         style={{
           position: "relative",
-          width: boardPx,
-          height: boardPx,
-          backgroundImage: `repeating-linear-gradient(${T.ledger} 0 1px, transparent 1px ${cellSize}px)`,
+          width: "calc(var(--cell) * 9)",
+          height: "calc(var(--cell) * 9)",
+          backgroundImage: `repeating-linear-gradient(${T.ledger} 0 1px, transparent 1px var(--cell))`,
         }}
       >
         {/* cells */}
-        <div style={{ display: "grid", gridTemplateColumns: `repeat(9, ${cellSize}px)`, gridTemplateRows: `repeat(9, ${cellSize}px)` }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(9, var(--cell))", gridTemplateRows: "repeat(9, var(--cell))" }}>
           {grid.map((row, r) =>
             row.map((val, c) => {
               const state = cellState(r, c);
@@ -1699,8 +1787,8 @@ function Board({ T, grid, notesGrid, onCellClick, onCellRightClick, cellState, i
                     onCellRightClick(r, c);
                   }}
                   style={{
-                    width: cellSize,
-                    height: cellSize,
+                    width: "var(--cell)",
+                    height: "var(--cell)",
                     display: "flex",
                     alignItems: "center",
                     justifyContent: "center",
@@ -1717,7 +1805,7 @@ function Board({ T, grid, notesGrid, onCellClick, onCellRightClick, cellState, i
                     <span
                       style={{
                         fontFamily: "'JetBrains Mono', monospace",
-                        fontSize: digitFontSize,
+                        fontSize: "var(--digit-fs)",
                         fontWeight: given ? 800 : 600,
                         color: state.isError ? T.error : given ? T.given : T.userNum,
                       }}
@@ -1725,21 +1813,13 @@ function Board({ T, grid, notesGrid, onCellClick, onCellRightClick, cellState, i
                       {val}
                     </span>
                   ) : notes.size > 0 ? (
-                    <div
-                      style={{
-                        display: "grid",
-                        gridTemplateColumns: "repeat(3, 1fr)",
-                        width: "100%",
-                        height: "100%",
-                        padding: 2,
-                      }}
-                    >
+                    <div className="cell-notes">
                       {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((n) => (
                         <span
                           key={n}
                           style={{
                             fontFamily: "'JetBrains Mono', monospace",
-                            fontSize: noteFontSize,
+                            fontSize: "var(--note-fs)",
                             color: T.note,
                             display: "flex",
                             alignItems: "center",

@@ -13,5 +13,351 @@ html, body {
 }
 
 #root {
-  min-height: 100vh;
+  min-height: 100vh;   /* fallback for browsers without dynamic viewport units */
+  min-height: 100dvh;  /* iOS Safari: 100vh is measured with the URL bar COLLAPSED,
+                          so it is taller than what you can actually see. 100dvh
+                          tracks the visible viewport. Identical to 100vh on desktop. */
+}
+
+/* --------------------------------------------------------------------------
+   TOUCH HYGIENE
+   All no-ops on a mouse-driven desktop, so the PC build is unaffected.
+   -------------------------------------------------------------------------- */
+button,
+.cell {
+  touch-action: manipulation;               /* disables double-tap-to-zoom, which otherwise
+                                               fires when you tap two cells in quick succession */
+  -webkit-tap-highlight-color: transparent; /* removes the grey flash box on every tap */
+}
+
+.cell {
+  -webkit-touch-callout: none;              /* no iOS long-press "copy/share" bubble over the board */
+}
+
+/* ==========================================================================
+   GAME SCREEN LAYOUT
+
+   Why this lives in a stylesheet at all: a React inline `style={{}}` object
+   compiles to the HTML style attribute, which holds declarations only. It has
+   no cascade and no at-rules, so a media query CANNOT be expressed there. The
+   app was styled 100% inline, which is why it had no responsive behaviour --
+   there was nowhere to put it.
+
+   The split: *sizing* lives here, *colour* stays inline (it is genuinely
+   dynamic: theme x accent, computed in JS). They meet via custom properties.
+
+   The contract with the desktop build:
+     JS passes only the IDEAL sizes, as `--*-ideal` custom properties. Those
+     ideals are the exact integers the old code computed. The default rules
+     below just pass them straight through, so above the breakpoint the
+     rendered pixels are unchanged. Only inside the compact media query does
+     CSS clamp the ideal down to what actually fits.
+   ========================================================================== */
+
+.lsg {
+  --page-pad: 20px 16px 32px;
+
+  /* Pass-through layer: desktop == the old hard-coded numbers, exactly. */
+  --row-w:      var(--row-w-ideal);
+  --pad-btn-py: var(--pad-btn-py-ideal);
+  --pad-fs:     var(--pad-fs-ideal);
+  --badge-fs:   var(--badge-fs-ideal);
+  --hint-fs:    var(--hint-fs-ideal);
+
+  /* Board wrapper padding (8px x2) + outer border (3px x2). */
+  --board-chrome: 22px;
+
+  min-height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: var(--page-pad);
+}
+
+.lsg-row {
+  width: 100%;
+  max-width: var(--row-w);
+}
+
+.lsg-topbar,
+.lsg-status {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 14px;
+}
+
+.lsg-status {
+  padding: 10px 16px;
+  border-radius: 10px;
+}
+
+.lsg-boardstage {
+  position: relative;
+
+  /* Single source of truth for board geometry. Everything inside the board --
+     cell box, digit size, note size, and the ruled-paper gradient period --
+     is derived from --cell, so they can never drift apart. */
+  --cell:     var(--cell-ideal);
+  --digit-fs: var(--digit-fs-ideal);
+  --note-fs:  var(--note-fs-ideal);
+}
+
+.lsg-controls {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 100%;
+}
+
+.lsg-tools {
+  display: flex;
+  justify-content: space-around;
+  margin-top: 16px;
+}
+
+/* These are the exact values ToolButton used to set inline. They live here so
+   the compact layout can shrink them -- an inline padding cannot be narrowed by
+   a media query, which is the whole problem of this app in miniature. */
+.toolbtn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  border: none;
+  border-radius: 8px;
+  padding: 8px 10px;
+  min-width: 64px;
+}
+
+.lsg-pad {
+  display: grid;
+  grid-template-columns: var(--pad-cols, repeat(9, 1fr));
+  gap: 6px;
+  margin-top: 14px;
+}
+
+.numbtn {
+  position: relative;
+  border-radius: 8px;
+  padding: var(--pad-btn-py) 0;
+  font-size: var(--pad-fs);
+  font-family: 'JetBrains Mono', monospace;
+  font-weight: 700;
+  transition: background 0.12s, border-color 0.12s;
+}
+
+.numbtn-badge {
+  position: absolute;
+  top: 2px;
+  right: 4px;
+  font-size: var(--badge-fs);
+  font-weight: 600;
+}
+
+/* The pad's 10th slot (Erase). Only exists in the 5x2 touch layout. */
+.lsg-pad-erase {
+  display: none;
+}
+
+.cell-notes {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  width: 100%;
+  height: 100%;
+  padding: 2px;
+}
+
+.lsg-hint {
+  margin-top: 10px;
+  text-align: center;
+  font-size: var(--hint-fs);
+}
+
+.lsg-autocheck {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 18px;
+  cursor: pointer;
+}
+
+/* Capability queries, not size queries. "Does this device have a hovering
+   pointer?" is a different question from "is the window narrow?", and the
+   instruction text depends on the former, not the latter. */
+.lsg-hint-coarse { display: none; }
+
+@media (hover: none) {
+  .lsg-hint-fine   { display: none; }
+  .lsg-hint-coarse { display: inline; }
+}
+
+/* ==========================================================================
+   COMPACT LAYOUT
+
+   Activates at <=640px wide, or on any short landscape viewport (a phone held
+   sideways is 844x390 -- wide, but far too short for a 526px board).
+
+   640px is deliberately below Electron's 720px default window width, so the
+   packaged desktop app never enters this mode at its normal size. It only
+   triggers if the window is dragged narrower than 640px -- where the current
+   build is already horizontally clipped, so there is nothing to preserve.
+   ========================================================================== */
+@media (max-width: 640px), (orientation: landscape) and (max-height: 560px) {
+  .lsg {
+    --page-pad: 8px 10px calc(10px + env(safe-area-inset-bottom, 0px));
+    --row-w: 100%;         /* rows span the screen instead of a 420px floor */
+    --pad-cols: repeat(5, 1fr);
+    --pad-btn-py: 0px;     /* height comes from min-height instead, see below */
+    --pad-fs: 20px;
+    --badge-fs: 10px;
+    --hint-fs: 12px;
+
+    height: 100dvh;        /* a definite height is what lets the board flex-shrink */
+  }
+
+  /* The board gets whatever vertical space is left after the chrome, and is
+     centred in it. flex-basis:0 (not auto) means its height is decided purely
+     by the leftover space -- it does not feed back off its own content, which
+     is what makes the container query below non-circular. */
+  .lsg-boardwrap {
+    flex: 1 1 0;
+    min-height: 0;
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    container-type: size;
+  }
+
+  /* Fallback for browsers without size container queries: fit to width only. */
+  .lsg-boardstage {
+    --cell: min(
+      var(--cell-ideal),
+      calc((100vw - 20px - var(--board-chrome)) / 9)
+    );
+    --digit-fs: calc(var(--cell) * 0.55);          /* 31/56, the desktop ratio */
+    --note-fs:  max(9px, calc(var(--cell) * 0.23)); /* 13/56 */
+  }
+
+  .cell-notes { padding: 1px; }
+
+  /* On a phone the board competes with the chrome for vertical space, and it
+     loses by default: every pixel of margin here is a pixel the board doesn't
+     get. So the chrome is squeezed to the minimum that still reads clearly. */
+  .lsg-topbar,
+  .lsg-status { margin-bottom: 6px; }
+
+  .lsg-status { padding: 8px 12px; }
+
+  .lsg-tools { margin-top: 8px; }
+
+  .toolbtn {
+    padding: 4px 8px;
+    gap: 2px;
+    min-width: 56px;
+  }
+
+  /* Erase moves out of the tool tray and into the pad's 10th slot, so the most
+     frequently used correction sits under the thumb rather than up near the board. */
+  .lsg-tool-erase { display: none; }
+
+  .lsg-pad {
+    gap: 6px;
+    margin-top: 10px;
+  }
+
+  .lsg-hint { margin-top: 8px; }
+
+  .lsg-autocheck { margin-top: 10px; }
+
+  .lsg-pad-erase {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  /* 5 columns instead of 9 turns ~33px targets into ~62x48px ones.
+     Apple HIG asks for 44pt, Material for 48dp; both are now met. */
+  .numbtn {
+    min-height: 48px;
+  }
+
+  .lsg-autocheck input {
+    width: 18px;
+    height: 18px;
+  }
+}
+
+/* Size container queries: constrain the cell by the height ACTUALLY available
+   to the board, as measured by the browser, rather than by a hard-coded guess
+   at how tall the surrounding UI is. This is what guarantees zero scrolling
+   during a game on any phone. */
+@supports (container-type: size) {
+  @media (max-width: 640px), (orientation: landscape) and (max-height: 560px) {
+    .lsg-boardstage {
+      --cell: min(
+        var(--cell-ideal),
+        calc((100cqw - var(--board-chrome)) / 9),
+        calc((100cqh - var(--board-chrome)) / 9)
+      );
+    }
+  }
+}
+
+/* --------------------------------------------------------------------------
+   SHORT PHONES (iPhone SE, small Androids, and any phone whose browser
+   toolbars eat the viewport). Here the board and the number pad are directly
+   competing for height, and the board loses. Buy it space back by dropping the
+   purely instructional row and trimming the pad to the 44pt minimum rather
+   than the 48dp comfortable size.
+   -------------------------------------------------------------------------- */
+@media (max-width: 640px) and (max-height: 640px) {
+  .lsg-hint { display: none; }
+  .numbtn { min-height: 44px; }
+  .lsg-tools { margin-top: 6px; }
+  .toolbtn { padding: 3px 8px; }
+  .lsg-autocheck { margin-top: 6px; }
+}
+
+/* --------------------------------------------------------------------------
+   LANDSCAPE PHONE
+   Vertical space is the scarce resource, so stop stacking. Board on the left,
+   sized off the viewport height; all chrome in a column on the right.
+   CSS grid areas do this without reordering the DOM.
+   -------------------------------------------------------------------------- */
+@media (orientation: landscape) and (max-height: 560px) {
+  .lsg {
+    display: grid;
+    grid-template-columns: auto minmax(220px, 1fr);
+    grid-template-rows: auto auto 1fr;
+    grid-template-areas:
+      "board topbar"
+      "board status"
+      "board controls";
+    column-gap: 14px;
+    align-items: start;
+  }
+
+  .lsg-topbar   { grid-area: topbar; }
+  .lsg-status   { grid-area: status; }
+  .lsg-controls { grid-area: controls; }
+
+  .lsg-boardwrap {
+    grid-area: board;
+    align-self: stretch;
+    width: auto;
+    container-type: normal; /* height now comes from dvh, so no container needed */
+  }
+
+  /* Height-driven: the board is square, so its width follows from the height. */
+  .lsg-boardstage {
+    --cell: min(
+      var(--cell-ideal),
+      calc((100dvh - 36px - var(--board-chrome)) / 9)
+    );
+  }
+
+  .lsg-hint { display: none; }
+  .lsg-autocheck { margin-top: 10px; }
 }
