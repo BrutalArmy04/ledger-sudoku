@@ -5,7 +5,7 @@
   "type": "module",
   "main": "electron/main.cjs",
   "description": "A premium, ad-free Sudoku app.",
-  "author": "Ledger Sudoku",
+  "author": "Ledger Sudoku <stefanrotaru05@gmail.com>",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
@@ -13,7 +13,9 @@
     "preview": "vite preview",
     "electron:dev": "concurrently -k \"vite\" \"wait-on tcp:5173 && cross-env NODE_ENV=development electron .\"",
     "electron:build": "vite build && node scripts/fix-electron-html.cjs && electron-builder",
-    "dist:win": "vite build && node scripts/fix-electron-html.cjs && electron-builder --win --x64"
+    "dist:win": "vite build && node scripts/fix-electron-html.cjs && electron-builder --win --x64",
+    "dist:linux": "vite build && node scripts/fix-electron-html.cjs && electron-builder --linux",
+    "dist:mac": "vite build && node scripts/fix-electron-html.cjs && electron-builder --mac"
   },
   "dependencies": {
     "react": "^19.2.7",
@@ -61,6 +63,41 @@
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true
+    },
+    "linux": {
+      "target": [
+        {
+          "target": "AppImage",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "deb",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "category": "Game",
+      "icon": "build/icon.png"
+    },
+    "mac": {
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "universal"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "universal"
+          ]
+        }
+      ],
+      "category": "public.app-category.puzzle-games"
     }
   }
 }

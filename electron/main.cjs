@@ -18,7 +18,22 @@ function createWindow() {
     },
   });
 
-  Menu.setApplicationMenu(null);
+  if (process.platform === 'darwin') {
+    // Unlike Windows/Linux, macOS relies on the app menu for Cmd+Q/Cmd+W and
+    // the edit menu for Cmd+C/V/X/A. Passing null here (as we do elsewhere)
+    // removes those roles entirely rather than just hiding a menu bar - the
+    // app still runs, but looks frozen to anyone who doesn't know to
+    // right-click the dock icon to quit.
+    Menu.setApplicationMenu(
+      Menu.buildFromTemplate([
+        { role: 'appMenu' },
+        { role: 'editMenu' },
+        { role: 'windowMenu' },
+      ])
+    );
+  } else {
+    Menu.setApplicationMenu(null);
+  }
 
   if (isDev) {
     win.loadURL('http://localhost:5173');

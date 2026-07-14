@@ -17,6 +17,15 @@ Menu entry and desktop shortcut.
 > First launch may show a Windows SmartScreen warning (the app isn't
 > code-signed). Click **More info → Run anyway**.
 
+## Downloads
+
+Each [release](https://github.com/BrutalArmy04/ledger-sudoku/releases/latest)
+includes builds for Windows (`.exe` installer and portable), Linux
+(`.AppImage` and `.deb`), and macOS (`.dmg`).
+
+> The macOS build is unsigned, so Gatekeeper will block it on first launch.
+> Right-click the app → **Open** to run it anyway.
+
 ---
 A premium, ad-free Sudoku app — classic 9x9 puzzles with pencil notes, hints,
 mistake tracking, undo, light/dark themes, and a real difficulty grader
