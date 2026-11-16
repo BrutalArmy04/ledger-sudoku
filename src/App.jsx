@@ -261,13 +261,13 @@ function SudokuApp() {
   // must stay pure (StrictMode runs them twice), and this one now also
   // refunds a hint.
   const handleUndo = useCallback(() => {
-    if (history.length === 0) return;
+    if (won || history.length === 0) return; // a solved board is final
     const last = history[history.length - 1];
     setGrid(last.grid);
     setNotesGrid(last.notes);
     if (last.fromHint) setHintsLeft((h) => h + 1);
     setHistory(history.slice(0, -1));
-  }, [history]);
+  }, [history, won]);
 
   const isGiven = useCallback((r, c) => puzzle && puzzle[r][c] !== 0, [puzzle]);
 
@@ -556,7 +556,7 @@ function SudokuApp() {
       clearCell={clearCell}
       useHint={useHint}
       handleUndo={handleUndo}
-      canUndo={history.length > 0}
+      canUndo={!won && history.length > 0}
       difficulty={actualDifficulty || difficulty}
       onMenu={() => {
         // There is no way back into this game from the menu, so leaving
