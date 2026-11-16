@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { cloneGrid, peers, generatePuzzle, boardIsComplete } from "./lib/sudoku.js";
+import { digitPadState } from "./lib/pad.js";
 import { recordStart, recordWin, recordAbandon, loadStats, saveStats } from "./stats.js";
 
 /* ============================================================
@@ -413,7 +414,15 @@ function SudokuApp() {
   // keyboard support
   useEffect(() => {
     function onKey(e) {
-      if (screen !== "game" || won) return;
+      if (screen !== "game") return;
+      if (e.key === "Escape") {
+        // Disarm the pad digit and drop the selection -- the keyboard way out
+        // of number-first entry.
+        setSelectedDigit(null);
+        setSelected(null);
+        return;
+      }
+      if (won) return;
       if (e.key >= "1" && e.key <= "9") placeNumber(parseInt(e.key, 10));
       else if (e.key === "Backspace" || e.key === "Delete" || e.key === "0") clearCell();
       else if (e.key === "ArrowUp" && selected) setSelected([(selected[0] + 8) % 9, selected[1]]);
@@ -426,6 +435,15 @@ function SudokuApp() {
   }, [screen, won, selected, placeNumber, clearCell]);
 
   const selectedValue = selected && grid ? grid[selected[0]][selected[1]] : 0;
+
+  // Remaining count + dimmed/disabled per pad digit (rules in src/lib/pad.js).
+  const padState = useMemo(() => digitPadState(grid, solution, autoCheck), [grid, solution, autoCheck]);
+
+  // A digit whose button just became disabled can't be clicked to disarm it,
+  // so disarm it here; otherwise every cell click would keep placing it.
+  useEffect(() => {
+    if (selectedDigit && padState[selectedDigit].disabled) setSelectedDigit(null);
+  }, [selectedDigit, padState]);
 
   const cellState = useCallback(
     (r, c) => {
@@ -516,6 +534,7 @@ function SudokuApp() {
       autoCheck={autoCheck}
       setAutoCheck={setAutoCheck}
       cellState={cellState}
+      padState={padState}
       isGiven={isGiven}
       placeNumber={placeNumber}
       clearCell={clearCell}
@@ -1025,7 +1044,7 @@ function GameScreen(props) {
     grid, notesGrid, selected, setSelected,
     selectedDigit, onPadDigit, coarsePointer, handleCellClick, handleCellRightClick,
     mode, setMode, mistakes, hintsLeft, seconds, paused, setPaused, won,
-    autoCheck, setAutoCheck, cellState, isGiven,
+    autoCheck, setAutoCheck, cellState, padState, isGiven,
     placeNumber, clearCell, useHint, handleUndo, canUndo,
     difficulty, onMenu, onNewGame, onSettings,
   } = props;
@@ -1043,13 +1062,6 @@ function GameScreen(props) {
   // board. That is a pre-existing desktop quirk and it is preserved on purpose
   // -- fixing it would change the PC layout. It is a one-line fix when you want it.
   const rowWidthIdeal = Math.max(420, Math.round(BOARD_BASE_CELL * fontScale) * 9 + BOARD_CHROME);
-
-  const numberCounts = useMemo(() => {
-    const counts = Array(10).fill(0);
-    if (!grid) return counts;
-    grid.forEach((row) => row.forEach((v) => { if (v) counts[v]++; }));
-    return counts;
-  }, [grid]);
 
   if (!grid) return null;
 
@@ -1239,13 +1251,13 @@ function GameScreen(props) {
             would give ~33px targets. The 10th slot becomes Erase. */}
         <div className="lsg-row lsg-pad">
           {Array.from({ length: 9 }, (_, i) => i + 1).map((n) => {
-            const remaining = 9 - numberCounts[n];
+            const { remaining, dimmed, disabled } = padState[n];
             const armed = selectedDigit === n;
             return (
               <button
                 key={n}
                 className="numbtn"
-                disabled={remaining <= 0}
+                disabled={disabled}
                 aria-label={`Digit ${n}`}
                 onClick={(e) => {
                   e.stopPropagation();
@@ -1254,8 +1266,8 @@ function GameScreen(props) {
                 style={{
                   background: armed ? T.accent : T.paper,
                   border: `1px solid ${armed ? T.accent : T.border}`,
-                  color: armed ? "#fff" : remaining <= 0 ? T.textMuted : T.text,
-                  opacity: remaining <= 0 ? 0.3 : 1,
+                  color: armed ? "#fff" : dimmed ? T.textMuted : T.text,
+                  opacity: dimmed && !armed ? 0.3 : 1,
                 }}
               >
                 {n}
