@@ -375,10 +375,35 @@ export function generatePuzzle(difficulty) {
   return best;
 }
 
+// Backtracking with the same most-constrained-cell (MRV) choice countSolutions
+// uses: always branch on the empty cell with the fewest candidates, and stop
+// at a dead end (a cell with none). fillBoard's first-empty-cell order is fine
+// for filling an empty grid at random, but on a sparse puzzle it can take
+// tens of seconds. Returns the solved grid, or the input unchanged if unsolvable.
 export function solveBoard(grid) {
   const g = cloneGrid(grid);
-  fillBoard(g);
-  return g;
+  function solve() {
+    let br = -1, bc = -1, best = null;
+    for (let r = 0; r < SIZE; r++) {
+      for (let c = 0; c < SIZE; c++) {
+        if (g[r][c] !== 0) continue;
+        const opts = candidates(g, r, c);
+        if (opts.length === 0) return false;
+        if (!best || opts.length < best.length) {
+          best = opts;
+          br = r; bc = c;
+        }
+      }
+    }
+    if (br === -1) return true;
+    for (const n of best) {
+      g[br][bc] = n;
+      if (solve()) return true;
+    }
+    g[br][bc] = 0;
+    return false;
+  }
+  return solve() ? g : cloneGrid(grid);
 }
 
 export function isValidPlacement(grid, r, c, n) {

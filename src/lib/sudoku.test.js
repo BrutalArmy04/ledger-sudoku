@@ -139,6 +139,22 @@ describe("sudoku engine", () => {
     }
   });
 
+  test("solver speed: a minimal 17-clue puzzle solves within the default timeout", () => {
+    // A fixed 17-clue puzzle (the fewest clues a uniquely solvable Sudoku can
+    // have). Sparse grids are where a naive first-empty-cell backtracker
+    // explodes; this one took ~60s with that strategy. Fixed input, so a
+    // regression fails every run rather than randomly.
+    const P = "000000010400000000020000000000050407008000300001090000300400200050100000000806000";
+    const puzzle = Array.from({ length: 9 }, (_, r) => [...P.slice(r * 9, r * 9 + 9)].map(Number));
+    const solved = solveBoard(puzzle);
+    expect(isValidCompleteGrid(solved), formatGrid(solved)).toBe(true);
+    puzzle.forEach((row, r) =>
+      row.forEach((v, c) => {
+        if (v !== 0) expect(solved[r][c]).toBe(v);
+      })
+    );
+  });
+
   // Determinism check (spec #6): skipped. generatePuzzle/generateSolvedBoard
   // take no seed parameter -- randomness comes from Math.random() inside
   // shuffle() with no way to inject a fixed source, so "same seed -> same
