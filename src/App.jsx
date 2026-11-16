@@ -438,7 +438,7 @@ function SudokuApp() {
         setSelected(null);
         return;
       }
-      if (won) return;
+      if (won || paused) return; // the board is hidden while paused
       if (e.key >= "1" && e.key <= "9") placeNumber(parseInt(e.key, 10));
       else if (e.key === "Backspace" || e.key === "Delete" || e.key === "0") clearCell();
       else if (e.key === "ArrowUp" && selected) setSelected([(selected[0] + 8) % 9, selected[1]]);
@@ -448,7 +448,7 @@ function SudokuApp() {
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [screen, won, selected, placeNumber, clearCell]);
+  }, [screen, won, paused, selected, placeNumber, clearCell]);
 
   const selectedValue = selected && grid ? grid[selected[0]][selected[1]] : 0;
 
