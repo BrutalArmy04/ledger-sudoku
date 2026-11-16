@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { cloneGrid, peers, generatePuzzle, boardIsComplete } from "./lib/sudoku.js";
+import { emptyStats, recordStart, recordWin, recordAbandon } from "./stats.js";
 
 /* ============================================================
    PERSISTENCE
@@ -29,11 +30,6 @@ function useCoarsePointer() {
   }, []);
 
   return coarse;
-}
-
-function useInMemoryStore(initial) {
-  const ref = useRef(initial);
-  return ref;
 }
 
 // Settings (theme, accent, font scale) persist across app restarts via
@@ -202,16 +198,7 @@ function SudokuApp() {
   const [actualDifficulty, setActualDifficulty] = useState(null);
   const [loading, setLoading] = useState(false);
 
-  const statsRef = useInMemoryStore({
-    gamesPlayed: 0,
-    gamesWon: 0,
-    bestTimes: {},
-    totalTimes: {},
-    completions: {},
-    currentStreak: 0,
-    bestStreak: 0,
-  });
-  const [statsVersion, setStatsVersion] = useState(0);
+  const [stats, setStats] = useState(emptyStats);
 
   const timerRef = useRef(null);
 
@@ -224,6 +211,7 @@ function SudokuApp() {
   }, [screen, paused, won]);
 
   const startGame = useCallback((diff) => {
+    setStats(recordAbandon); // no-op unless the current game was started and not won
     setLoading(true);
     setTimeout(() => {
       const { puzzle: p, solved, difficulty: actual } = generatePuzzle(diff);
@@ -263,6 +251,20 @@ function SudokuApp() {
 
   const isGiven = useCallback((r, c) => puzzle && puzzle[r][c] !== 0, [puzzle]);
 
+  // Shared by every path that can put the last correct digit on the board
+  // (a placed answer or a hint), so a win is always recorded the same way.
+  const finishIfSolved = useCallback(
+    (newGrid) => {
+      if (!boardIsComplete(newGrid)) return;
+      const allCorrect = newGrid.every((row, ri) => row.every((v, ci) => v === solution[ri][ci]));
+      if (!allCorrect) return;
+      setWon(true);
+      const diffKey = actualDifficulty || difficulty;
+      setStats((s) => recordWin(s, { difficulty: diffKey, seconds }));
+    },
+    [solution, actualDifficulty, difficulty, seconds]
+  );
+
   // Core placement logic, independent of how the cell/number were chosen.
   // Used by both keyboard entry (selected cell + mode) and mouse entry
   // (clicked cell + left/right click).
@@ -299,28 +301,11 @@ function SudokuApp() {
 
       setGrid(newGrid);
       setNotesGrid(newNotes);
-
-      if (boardIsComplete(newGrid)) {
-        const allCorrect = newGrid.every((row, ri) => row.every((v, ci) => v === solution[ri][ci]));
-        if (allCorrect) {
-          setWon(true);
-          const stats = statsRef.current;
-          stats.gamesPlayed += 1;
-          stats.gamesWon += 1;
-          stats.currentStreak += 1;
-          stats.bestStreak = Math.max(stats.bestStreak, stats.currentStreak);
-          const diffKey = actualDifficulty || difficulty;
-          if (!stats.bestTimes[diffKey] || seconds < stats.bestTimes[diffKey]) {
-            stats.bestTimes[diffKey] = seconds;
-          }
-          stats.totalTimes[diffKey] = (stats.totalTimes[diffKey] || []).concat(seconds);
-          stats.completions[diffKey] = (stats.completions[diffKey] || 0) + 1;
-          setStatsVersion((v) => v + 1);
-        }
-      }
+      setStats(recordStart); // first answer on the board makes the game "played"
+      finishIfSolved(newGrid);
       return true;
     },
-    [grid, notesGrid, won, paused, isGiven, solution, autoCheck, pushHistory, actualDifficulty, difficulty, seconds]
+    [grid, notesGrid, won, paused, isGiven, solution, autoCheck, pushHistory, finishIfSolved]
   );
 
   // Keyboard-entry path: acts on the currently selected cell, using the
@@ -405,12 +390,9 @@ function SudokuApp() {
     setGrid(newGrid);
     setNotesGrid(newNotes);
     setHintsLeft((h) => h - 1);
-
-    if (boardIsComplete(newGrid)) {
-      const allCorrect = newGrid.every((row, ri) => row.every((v, ci) => v === solution[ri][ci]));
-      if (allCorrect) setWon(true);
-    }
-  }, [selected, grid, notesGrid, hintsLeft, won, paused, isGiven, solution, pushHistory]);
+    setStats(recordStart); // a hint is an answer too
+    finishIfSolved(newGrid);
+  }, [selected, grid, notesGrid, hintsLeft, won, paused, isGiven, solution, pushHistory, finishIfSolved]);
 
   // keyboard support
   useEffect(() => {
@@ -464,7 +446,7 @@ function SudokuApp() {
         fontScale={fontScale}
         onStart={startGame}
         loading={loading}
-        statsRef={statsRef}
+        stats={stats}
         onStats={() => setScreen("stats")}
         onSettings={() => {
           prevScreenRef.current = "menu";
@@ -475,7 +457,7 @@ function SudokuApp() {
   }
 
   if (screen === "stats") {
-    return <StatsScreen T={T} fontScale={fontScale} statsRef={statsRef} onBack={() => setScreen("menu")} />;
+    return <StatsScreen T={T} fontScale={fontScale} stats={stats} onBack={() => setScreen("menu")} />;
   }
 
   if (screen === "settings") {
@@ -525,7 +507,12 @@ function SudokuApp() {
       handleUndo={handleUndo}
       canUndo={history.length > 0}
       difficulty={actualDifficulty || difficulty}
-      onMenu={() => setScreen("menu")}
+      onMenu={() => {
+        // There is no way back into this game from the menu, so leaving
+        // a started, unfinished game here abandons it.
+        setStats(recordAbandon);
+        setScreen("menu");
+      }}
       onNewGame={() => startGame(difficulty)}
       onSettings={() => {
         prevScreenRef.current = "game";
@@ -540,9 +527,8 @@ function SudokuApp() {
    MENU SCREEN
    ============================================================ */
 
-function MenuScreen({ T, themeMode, setThemeMode, fontScale = 1, onStart, loading, statsRef, onStats, onSettings }) {
+function MenuScreen({ T, themeMode, setThemeMode, fontScale = 1, onStart, loading, stats, onStats, onSettings }) {
   const [hoverDiff, setHoverDiff] = useState(null);
-  const stats = statsRef.current;
   const fs = (px) => Math.round(px * fontScale);
 
   return (
@@ -747,8 +733,7 @@ function MiniBoardArt({ T }) {
    STATS SCREEN
    ============================================================ */
 
-function StatsScreen({ T, fontScale = 1, statsRef, onBack }) {
-  const stats = statsRef.current;
+function StatsScreen({ T, fontScale = 1, stats, onBack }) {
   const winRate = stats.gamesPlayed ? Math.round((stats.gamesWon / stats.gamesPlayed) * 100) : 0;
   const fs = (px) => Math.round(px * fontScale);
 
