@@ -388,10 +388,19 @@ function SudokuApp() {
     if (!selected || !grid || won || paused) return;
     const [r, c] = selected;
     if (isGiven(r, c)) return;
-    pushHistory(grid, notesGrid);
-    const newGrid = cloneGrid(grid);
-    newGrid[r][c] = 0;
-    setGrid(newGrid);
+    // Erase the answer if there is one, otherwise the cell's pencil notes.
+    // An empty cell with no notes is left alone, with no undo step recorded.
+    if (grid[r][c] !== 0) {
+      pushHistory(grid, notesGrid);
+      const newGrid = cloneGrid(grid);
+      newGrid[r][c] = 0;
+      setGrid(newGrid);
+    } else if (notesGrid[r][c].size > 0) {
+      pushHistory(grid, notesGrid);
+      const newNotes = notesGrid.map((row) => row.map((s) => new Set(s)));
+      newNotes[r][c] = new Set();
+      setNotesGrid(newNotes);
+    }
   }, [selected, grid, notesGrid, won, paused, isGiven, pushHistory]);
 
   const useHint = useCallback(() => {
