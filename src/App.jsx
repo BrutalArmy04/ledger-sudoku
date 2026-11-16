@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { cloneGrid, peers, generatePuzzle, boardIsComplete } from "./lib/sudoku.js";
-import { emptyStats, recordStart, recordWin, recordAbandon } from "./stats.js";
+import { recordStart, recordWin, recordAbandon, loadStats, saveStats } from "./stats.js";
 
 /* ============================================================
    PERSISTENCE
@@ -38,6 +38,16 @@ function loadSettings() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY_SETTINGS);
     return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
+// localStorage can be missing or throw (privacy modes, file:// quirks);
+// loadStats/saveStats tolerate a null or throwing storage.
+function browserStorage() {
+  try {
+    return typeof localStorage === "undefined" ? null : localStorage;
   } catch {
     return null;
   }
@@ -198,7 +208,13 @@ function SudokuApp() {
   const [actualDifficulty, setActualDifficulty] = useState(null);
   const [loading, setLoading] = useState(false);
 
-  const [stats, setStats] = useState(emptyStats);
+  // Stats persist like settings. Loading also turns a game that was still in
+  // progress when the app last closed into an abandon (see src/stats.js).
+  const [stats, setStats] = useState(() => loadStats(browserStorage(), STORAGE_KEY_STATS));
+
+  useEffect(() => {
+    saveStats(browserStorage(), stats, STORAGE_KEY_STATS);
+  }, [stats]);
 
   const timerRef = useRef(null);
 
