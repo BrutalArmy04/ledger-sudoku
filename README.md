@@ -69,6 +69,8 @@ written up in **[ENGINEERING.md](ENGINEERING.md)**.
 
 ## Notes
 
-Stats (best times, streaks) are kept in memory only and reset when the app
-closes. The `statsRef` object in `src/App.jsx` is where you'd wire up
-persistent storage.
+Stats (games played, win rate, streaks, best times) are saved locally and
+survive restarts — in the browser's localStorage on the web, and in the
+app's own storage on desktop. A game counts as played from its first
+answer; leaving it unfinished resets the streak. The bookkeeping lives in
+`src/stats.js`, covered by `src/stats.test.js`.
