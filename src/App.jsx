@@ -252,19 +252,22 @@ function SudokuApp() {
     }, 30);
   }, []);
 
-  const pushHistory = useCallback((g, n) => {
-    setHistory((h) => [...h, { grid: cloneGrid(g), notes: n.map((row) => row.map((s) => new Set(s))) }]);
+  // `fromHint` marks the step a hint made, so undoing it gives the hint back.
+  const pushHistory = useCallback((g, n, fromHint = false) => {
+    setHistory((h) => [...h, { grid: cloneGrid(g), notes: n.map((row) => row.map((s) => new Set(s))), fromHint }]);
   }, []);
 
+  // Reads history from the closure instead of a setHistory updater: updaters
+  // must stay pure (StrictMode runs them twice), and this one now also
+  // refunds a hint.
   const handleUndo = useCallback(() => {
-    setHistory((h) => {
-      if (h.length === 0) return h;
-      const last = h[h.length - 1];
-      setGrid(last.grid);
-      setNotesGrid(last.notes);
-      return h.slice(0, -1);
-    });
-  }, []);
+    if (history.length === 0) return;
+    const last = history[history.length - 1];
+    setGrid(last.grid);
+    setNotesGrid(last.notes);
+    if (last.fromHint) setHintsLeft((h) => h + 1);
+    setHistory(history.slice(0, -1));
+  }, [history]);
 
   const isGiven = useCallback((r, c) => puzzle && puzzle[r][c] !== 0, [puzzle]);
 
@@ -411,7 +414,7 @@ function SudokuApp() {
     if (!selected || !grid || hintsLeft <= 0 || won || paused) return;
     const [r, c] = selected;
     if (isGiven(r, c) || grid[r][c] === solution[r][c]) return;
-    pushHistory(grid, notesGrid);
+    pushHistory(grid, notesGrid, true);
     const newGrid = cloneGrid(grid);
     newGrid[r][c] = solution[r][c];
     const newNotes = notesGrid.map((row) => row.map((s) => new Set(s)));
