@@ -299,6 +299,10 @@ function SudokuApp() {
         return true;
       }
 
+      // Same digit already there: nothing changes, so no undo step and no
+      // extra mistake for re-clicking a wrong answer.
+      if (grid[r][c] === n) return true;
+
       pushHistory(grid, notesGrid);
       const newGrid = cloneGrid(grid);
       newGrid[r][c] = n;
