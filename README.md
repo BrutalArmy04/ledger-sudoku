@@ -1,90 +1,76 @@
 # Ledger Sudoku
 
-A premium, ad-free Sudoku desktop app with a clean paper-and-pencil aesthetic.
+A premium, ad-free Sudoku app with a clean paper-and-pencil aesthetic.
+Classic 9×9 puzzles with pencil notes, hints, mistake tracking, undo, and
+light/dark themes — plus a real difficulty grader that checks which solving
+techniques a puzzle actually requires, not just how many clues are missing.
 
-## ▶ Test it right now
+Built with React + Vite and packaged with Electron. Runs in the browser on
+desktop **and phones**, and as a native app on Windows, Linux, and macOS.
 
-**[Play it in your browser](https://brutalarmy04.github.io/ledger-sudoku/)**
+**[▶ Play it in your browser](https://brutalarmy04.github.io/ledger-sudoku/)**
+— nothing to install.
 
-## ⬇️ Download
+## Download
 
-**[Download Ledger Sudoku for Windows](https://github.com/BrutalArmy04/ledger-sudoku/releases/latest)**
+Every [release](https://github.com/BrutalArmy04/ledger-sudoku/releases/latest)
+includes native builds:
 
-Grab the portable `Ledger Sudoku 1.0.0.exe` — no installation needed, just
-double-click and play. Or use the `Setup` installer if you'd prefer a Start
-Menu entry and desktop shortcut.
+| Platform | Files |
+| --- | --- |
+| **Windows** | `Setup` installer (Start Menu entry + shortcut), or a portable `.exe` — just double-click and play |
+| **Linux** | `.AppImage` (portable) and `.deb` |
+| **macOS** | `.dmg` |
 
-> First launch may show a Windows SmartScreen warning (the app isn't
-> code-signed). Click **More info → Run anyway**.
+The apps aren't code-signed, so first launch needs one extra click:
 
-## Downloads
+- **Windows** — on the SmartScreen prompt, click **More info → Run anyway**.
+- **macOS** — Gatekeeper blocks it; right-click the app → **Open**.
 
-Each [release](https://github.com/BrutalArmy04/ledger-sudoku/releases/latest)
-includes builds for Windows (`.exe` installer and portable), Linux
-(`.AppImage` and `.deb`), and macOS (`.dmg`).
+## Run from source
 
-> The macOS build is unsigned, so Gatekeeper will block it on first launch.
-> Right-click the app → **Open** to run it anyway.
-
----
-A premium, ad-free Sudoku app — classic 9x9 puzzles with pencil notes, hints,
-mistake tracking, undo, light/dark themes, and a real difficulty grader
-(it checks which solving techniques a puzzle actually requires, not just
-how many clues are missing).
-
-## Play it in your browser (no install needed beyond Node.js)
-
-```
+```bash
 npm install
-npm run dev
+npm run dev            # web version at http://localhost:5173
+npm run electron:dev   # same app in its own desktop window
+npm test               # puzzle-engine test suite (Vitest)
 ```
 
-Open the printed URL (usually `http://localhost:5173`).
+## Build it yourself
 
-## Play it as a desktop app, in a window (quick check)
-
-```
-npm run electron:dev
-```
-
-This opens the game in its own window immediately — good for confirming
-everything works before building the full Windows installer below.
-
-## Build a Windows .exe
-
-```
-npm run dist:win
+```bash
+npm run build       # static web build in dist/
+npm run dist:win    # Windows installer + portable exe (in release/)
+npm run dist:linux  # AppImage + deb — must be run on Linux
+npm run dist:mac    # dmg — must be run on macOS
 ```
 
-This produces a `release` folder containing:
+The first packaging run downloads Electron's build tools — a few minutes,
+once. Cross-platform releases are automated: pushing a tag `v*` runs the
+test suite, then builds all three platforms on GitHub Actions and attaches
+the artifacts to a Release.
 
-- **`Ledger Sudoku Setup 1.0.0.exe`** — a standard installer. Adds a Start
-  Menu entry and desktop shortcut.
-- **`Ledger Sudoku 1.0.0.exe`** — a portable, single-file version. No
-  installation — just double-click it to play. This is probably what you
-  want if you just want "an app I can double-click."
+## How it's built
 
-The first time you run `npm run dist:win`, it will download Electron's
-Windows build tools — this can take a few minutes and needs an internet
-connection, but only happens once.
+The puzzle engine — generator, backtracking solver, human-style logical
+solver, and difficulty grader — lives in `src/lib/sudoku.js` as pure
+JavaScript with no framework dependencies. It's covered by property tests
+in `src/lib/sudoku.test.js`; the key invariant is that **every generated
+puzzle is verified to have exactly one solution** before either CI pipeline
+(the Pages deploy or a release build) is allowed to proceed.
 
-## Building a standalone web version (no Electron)
+The React UI is in `src/App.jsx`, and the desktop entry point — window
+setup and per-platform menu handling — is in `electron/main.cjs`.
 
-```
-npm run build
-```
-
-Creates a `dist/` folder you can open directly (`dist/index.html`) or serve
-with any static file server.
+Design decisions and the bugs behind them (why the layout had to be
+restructured to become responsive, how notes were unreachable on every
+touch device, what breaks over `file://`, and how the engine is tested) are
+written up in **[ENGINEERING.md](ENGINEERING.md)**.
 
 ## Notes
 
-- Stats (best times, streaks) reset when you close the app — they're kept
-  in memory only, not saved to disk. The `statsRef` object in `src/App.jsx`
-  is where you'd wire up persistent storage if you want that later.
-- All game logic (puzzle generator, solver, difficulty grader) lives in
-  `src/App.jsx`, above the React components — plain JavaScript, no
-  framework dependencies, portable to other contexts (e.g. a future
-  Flutter/Dart port).
-- `electron/main.cjs` is the desktop app's entry point — the window size,
-  background color, and menu bar are configured there.
+Stats (games played, win rate, streaks, best times) are saved locally and
+survive restarts — in the browser's localStorage on the web, and in the
+app's own storage on desktop. A game counts as played from its first
+answer; leaving it unfinished resets the streak. The bookkeeping lives in
+`src/stats.js`, covered by `src/stats.test.js`.

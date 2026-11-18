@@ -1,399 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
-
-/* ============================================================
-   ENGINE — generator, solver, grader
-   ============================================================ */
-
-const SIZE = 9;
-const BOX = 3;
-
-function emptyGrid() {
-  return Array.from({ length: SIZE }, () => Array(SIZE).fill(0));
-}
-
-function cloneGrid(g) {
-  return g.map((r) => r.slice());
-}
-
-function peers(r, c) {
-  const list = [];
-  for (let i = 0; i < SIZE; i++) {
-    if (i !== c) list.push([r, i]);
-    if (i !== r) list.push([i, c]);
-  }
-  const br = Math.floor(r / BOX) * BOX;
-  const bc = Math.floor(c / BOX) * BOX;
-  for (let i = br; i < br + BOX; i++) {
-    for (let j = bc; j < bc + BOX; j++) {
-      if (i !== r || j !== c) list.push([i, j]);
-    }
-  }
-  return list;
-}
-
-function candidates(grid, r, c) {
-  if (grid[r][c] !== 0) return [];
-  const used = new Set();
-  for (const [pr, pc] of peers(r, c)) {
-    if (grid[pr][pc] !== 0) used.add(grid[pr][pc]);
-  }
-  const out = [];
-  for (let n = 1; n <= 9; n++) if (!used.has(n)) out.push(n);
-  return out;
-}
-
-function shuffle(arr) {
-  const a = arr.slice();
-  for (let i = a.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [a[i], a[j]] = [a[j], a[i]];
-  }
-  return a;
-}
-
-// Fill a board completely via randomized backtracking
-function fillBoard(grid) {
-  for (let r = 0; r < SIZE; r++) {
-    for (let c = 0; c < SIZE; c++) {
-      if (grid[r][c] === 0) {
-        const opts = shuffle(candidates(grid, r, c));
-        for (const n of opts) {
-          grid[r][c] = n;
-          if (fillBoard(grid)) return true;
-          grid[r][c] = 0;
-        }
-        return false;
-      }
-    }
-  }
-  return true;
-}
-
-function generateSolvedBoard() {
-  const g = emptyGrid();
-  fillBoard(g);
-  return g;
-}
-
-// Count solutions up to a cap (2 is enough to know "not unique")
-function countSolutions(grid, cap = 2) {
-  let count = 0;
-  function backtrack(g) {
-    if (count >= cap) return;
-    let br = -1, bc = -1, bestLen = 10;
-    for (let r = 0; r < SIZE; r++) {
-      for (let c = 0; c < SIZE; c++) {
-        if (g[r][c] === 0) {
-          const len = candidates(g, r, c).length;
-          if (len < bestLen) {
-            bestLen = len;
-            br = r; bc = c;
-            if (len === 0) { r = SIZE; break; }
-          }
-        }
-      }
-    }
-    if (br === -1) { count++; return; }
-    if (bestLen === 0) return;
-    for (const n of candidates(g, br, bc)) {
-      g[br][bc] = n;
-      backtrack(g);
-      g[br][bc] = 0;
-      if (count >= cap) return;
-    }
-  }
-  backtrack(cloneGrid(grid));
-  return count;
-}
-
-// Human-style logical solver used for grading difficulty.
-// Returns { solved: bool, techniques: Set<string> }
-function logicalSolve(grid) {
-  const g = cloneGrid(grid);
-  const techniques = new Set();
-  const notes = Array.from({ length: SIZE }, (_, r) =>
-    Array.from({ length: SIZE }, (_, c) => new Set(candidates(g, r, c)))
-  );
-
-  function recomputeNotesAround(r, c) {
-    for (const [pr, pc] of peers(r, c)) {
-      if (g[pr][pc] === 0) notes[pr][pc].delete(g[r][c]);
-    }
-  }
-
-  function place(r, c, n) {
-    g[r][c] = n;
-    notes[r][c] = new Set();
-    recomputeNotesAround(r, c);
-  }
-
-  function isSolved() {
-    return g.every((row) => row.every((v) => v !== 0));
-  }
-
-  function units() {
-    const list = [];
-    for (let r = 0; r < SIZE; r++) list.push(Array.from({ length: SIZE }, (_, c) => [r, c]));
-    for (let c = 0; c < SIZE; c++) list.push(Array.from({ length: SIZE }, (_, r) => [r, c]));
-    for (let br = 0; br < SIZE; br += BOX) {
-      for (let bc = 0; bc < SIZE; bc += BOX) {
-        const cells = [];
-        for (let r = br; r < br + BOX; r++)
-          for (let c = bc; c < bc + BOX; c++) cells.push([r, c]);
-        list.push(cells);
-      }
-    }
-    return list;
-  }
-
-  let progress = true;
-  let iterations = 0;
-  const MAX_ITER = 400;
-
-  while (progress && !isSolved() && iterations < MAX_ITER) {
-    progress = false;
-    iterations++;
-
-    // Naked Single
-    for (let r = 0; r < SIZE; r++) {
-      for (let c = 0; c < SIZE; c++) {
-        if (g[r][c] === 0 && notes[r][c].size === 1) {
-          place(r, c, [...notes[r][c]][0]);
-          techniques.add("Naked Single");
-          progress = true;
-        }
-      }
-    }
-    if (progress) continue;
-
-    // Hidden Single
-    for (const unit of units()) {
-      for (let n = 1; n <= 9; n++) {
-        const cellsWithN = unit.filter(([r, c]) => g[r][c] === 0 && notes[r][c].has(n));
-        if (cellsWithN.length === 1) {
-          const [r, c] = cellsWithN[0];
-          place(r, c, n);
-          techniques.add("Hidden Single");
-          progress = true;
-        }
-      }
-    }
-    if (progress) continue;
-
-    // Naked Pair -> eliminate from peers in shared units
-    for (const unit of units()) {
-      const empties = unit.filter(([r, c]) => g[r][c] === 0);
-      for (let i = 0; i < empties.length; i++) {
-        for (let j = i + 1; j < empties.length; j++) {
-          const [r1, c1] = empties[i];
-          const [r2, c2] = empties[j];
-          if (notes[r1][c1].size === 2 && notes[r2][c2].size === 2) {
-            const a = [...notes[r1][c1]].sort().join(",");
-            const b = [...notes[r2][c2]].sort().join(",");
-            if (a === b) {
-              const pairVals = [...notes[r1][c1]];
-              for (const [r, c] of unit) {
-                if ((r === r1 && c === c1) || (r === r2 && c === c2)) continue;
-                if (g[r][c] === 0) {
-                  let changed = false;
-                  for (const v of pairVals) {
-                    if (notes[r][c].has(v)) {
-                      notes[r][c].delete(v);
-                      changed = true;
-                    }
-                  }
-                  if (changed) {
-                    techniques.add("Naked Pairs");
-                    progress = true;
-                  }
-                }
-              }
-            }
-          }
-        }
-      }
-    }
-    if (progress) continue;
-
-    // Pointing Pairs (box -> line elimination), simplified X-Wing-ish technique
-    for (let n = 1; n <= 9; n++) {
-      for (let br = 0; br < SIZE; br += BOX) {
-        for (let bc = 0; bc < SIZE; bc += BOX) {
-          const cells = [];
-          for (let r = br; r < br + BOX; r++)
-            for (let c = bc; c < bc + BOX; c++)
-              if (g[r][c] === 0 && notes[r][c].has(n)) cells.push([r, c]);
-          if (cells.length === 2 || cells.length === 3) {
-            const rows = new Set(cells.map((x) => x[0]));
-            const cols = new Set(cells.map((x) => x[1]));
-            if (rows.size === 1) {
-              const r = [...rows][0];
-              for (let c = 0; c < SIZE; c++) {
-                if (c >= bc && c < bc + BOX) continue;
-                if (g[r][c] === 0 && notes[r][c].has(n)) {
-                  notes[r][c].delete(n);
-                  techniques.add("Pointing Pairs");
-                  progress = true;
-                }
-              }
-            }
-            if (cols.size === 1) {
-              const c = [...cols][0];
-              for (let r = 0; r < SIZE; r++) {
-                if (r >= br && r < br + BOX) continue;
-                if (g[r][c] === 0 && notes[r][c].has(n)) {
-                  notes[r][c].delete(n);
-                  techniques.add("Pointing Pairs");
-                  progress = true;
-                }
-              }
-            }
-          }
-        }
-      }
-    }
-  }
-
-  return { solved: isSolved(), techniques };
-}
-
-const DIFFICULTY_TARGETS = {
-  Easy: { minClues: 38, maxClues: 45 },
-  Medium: { minClues: 32, maxClues: 37 },
-  Hard: { minClues: 28, maxClues: 31 },
-  Expert: { minClues: 24, maxClues: 27 },
-  Master: { minClues: 17, maxClues: 23 },
-};
-
-// Tiers are cumulative: each tier's technique set is a superset of easier tiers.
-// A puzzle's "technique tier" is the tier of the hardest technique it required.
-const TECHNIQUE_TIER = {
-  "Naked Single": 0,
-  "Hidden Single": 0,
-  "Naked Pairs": 1,
-  "Pointing Pairs": 2,
-};
-const TIER_NAMES = ["Easy", "Medium", "Hard", "Expert"]; // index = tier; unsolved -> Master
-
-function gradeDifficulty(grid) {
-  const { solved, techniques } = logicalSolve(grid);
-  const clueCount = grid.flat().filter((v) => v !== 0).length;
-
-  if (!solved) return "Master"; // needed deeper backtracking-style logic -> hardest
-
-  let maxTier = 0;
-  for (const tech of techniques) {
-    const tier = TECHNIQUE_TIER[tech] ?? 0;
-    if (tier > maxTier) maxTier = tier;
-  }
-  const techniqueDifficulty = TIER_NAMES[maxTier] || "Expert";
-
-  // Also derive a difficulty purely from clue count, then take whichever is harder,
-  // since a sparse puzzle solvable only with easy techniques still plays sparse-hard.
-  const order = ["Easy", "Medium", "Hard", "Expert", "Master"];
-  let clueDifficulty = "Master";
-  for (const diff of order) {
-    if (clueCount >= DIFFICULTY_TARGETS[diff].minClues) {
-      clueDifficulty = diff;
-      break;
-    }
-  }
-
-  const idx = (d) => order.indexOf(d);
-  return idx(techniqueDifficulty) > idx(clueDifficulty) ? techniqueDifficulty : clueDifficulty;
-}
-
-// Dig holes from a solved board until target clue count / difficulty reached
-function generatePuzzleOnce(difficulty) {
-  const target = DIFFICULTY_TARGETS[difficulty];
-  const solved = generateSolvedBoard();
-  const puzzle = cloneGrid(solved);
-  const cellOrder = shuffle(
-    Array.from({ length: SIZE * SIZE }, (_, i) => [Math.floor(i / SIZE), i % SIZE])
-  );
-
-  let clueCount = SIZE * SIZE;
-  for (const [r, c] of cellOrder) {
-    if (clueCount <= target.minClues) break;
-    const backup = puzzle[r][c];
-    puzzle[r][c] = 0;
-    if (countSolutions(puzzle, 2) === 1) {
-      clueCount--;
-    } else {
-      puzzle[r][c] = backup;
-    }
-  }
-
-  // Try to refine toward exact target difficulty by digging a bit further if possible
-  let actualDifficulty = gradeDifficulty(puzzle);
-  let attempts = 0;
-  const order = ["Easy", "Medium", "Hard", "Expert", "Master"];
-  while (
-    order.indexOf(actualDifficulty) < order.indexOf(difficulty) &&
-    clueCount > target.minClues - 4 &&
-    attempts < 30
-  ) {
-    const remaining = shuffle(
-      cellOrder.filter(([r, c]) => puzzle[r][c] !== 0)
-    );
-    let dug = false;
-    for (const [r, c] of remaining) {
-      const backup = puzzle[r][c];
-      puzzle[r][c] = 0;
-      if (countSolutions(puzzle, 2) === 1) {
-        clueCount--;
-        dug = true;
-        break;
-      } else {
-        puzzle[r][c] = backup;
-      }
-    }
-    attempts++;
-    if (!dug) break;
-    actualDifficulty = gradeDifficulty(puzzle);
-  }
-
-  return { puzzle, solved, difficulty: actualDifficulty, clueCount };
-}
-
-// Generate several candidates and keep the one whose graded difficulty is
-// closest to the requested tier, since a single dig pass can over- or undershoot.
-function generatePuzzle(difficulty) {
-  const order = ["Easy", "Medium", "Hard", "Expert", "Master"];
-  const targetIdx = order.indexOf(difficulty);
-  let best = null;
-  let bestDist = Infinity;
-  const MAX_CANDIDATES = 4;
-
-  for (let i = 0; i < MAX_CANDIDATES; i++) {
-    const candidate = generatePuzzleOnce(difficulty);
-    const dist = Math.abs(order.indexOf(candidate.difficulty) - targetIdx);
-    if (dist === 0) return candidate;
-    if (dist < bestDist) {
-      bestDist = dist;
-      best = candidate;
-    }
-  }
-  return best;
-}
-
-function solveBoard(grid) {
-  const g = cloneGrid(grid);
-  fillBoard(g);
-  return g;
-}
-
-function isValidPlacement(grid, r, c, n) {
-  if (n === 0) return true;
-  for (const [pr, pc] of peers(r, c)) {
-    if (grid[pr][pc] === n) return false;
-  }
-  return true;
-}
-
-function boardIsComplete(grid) {
-  return grid.every((row) => row.every((v) => v !== 0));
-}
+import { cloneGrid, peers, generatePuzzle, boardIsComplete } from "./lib/sudoku.js";
+import { digitPadState } from "./lib/pad.js";
+import { recordStart, recordWin, recordAbandon, loadStats, saveStats } from "./stats.js";
 
 /* ============================================================
    PERSISTENCE
@@ -425,17 +33,22 @@ function useCoarsePointer() {
   return coarse;
 }
 
-function useInMemoryStore(initial) {
-  const ref = useRef(initial);
-  return ref;
-}
-
 // Settings (theme, accent, font scale) persist across app restarts via
 // localStorage, which Electron backs with on-disk storage per origin.
 function loadSettings() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY_SETTINGS);
     return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
+// localStorage can be missing or throw (privacy modes, file:// quirks);
+// loadStats/saveStats tolerate a null or throwing storage.
+function browserStorage() {
+  try {
+    return typeof localStorage === "undefined" ? null : localStorage;
   } catch {
     return null;
   }
@@ -596,16 +209,13 @@ function SudokuApp() {
   const [actualDifficulty, setActualDifficulty] = useState(null);
   const [loading, setLoading] = useState(false);
 
-  const statsRef = useInMemoryStore({
-    gamesPlayed: 0,
-    gamesWon: 0,
-    bestTimes: {},
-    totalTimes: {},
-    completions: {},
-    currentStreak: 0,
-    bestStreak: 0,
-  });
-  const [statsVersion, setStatsVersion] = useState(0);
+  // Stats persist like settings. Loading also turns a game that was still in
+  // progress when the app last closed into an abandon (see src/stats.js).
+  const [stats, setStats] = useState(() => loadStats(browserStorage(), STORAGE_KEY_STATS));
+
+  useEffect(() => {
+    saveStats(browserStorage(), stats, STORAGE_KEY_STATS);
+  }, [stats]);
 
   const timerRef = useRef(null);
 
@@ -618,6 +228,7 @@ function SudokuApp() {
   }, [screen, paused, won]);
 
   const startGame = useCallback((diff) => {
+    setStats(recordAbandon); // no-op unless the current game was started and not won
     setLoading(true);
     setTimeout(() => {
       const { puzzle: p, solved, difficulty: actual } = generatePuzzle(diff);
@@ -641,21 +252,38 @@ function SudokuApp() {
     }, 30);
   }, []);
 
-  const pushHistory = useCallback((g, n) => {
-    setHistory((h) => [...h, { grid: cloneGrid(g), notes: n.map((row) => row.map((s) => new Set(s))) }]);
+  // `fromHint` marks the step a hint made, so undoing it gives the hint back.
+  const pushHistory = useCallback((g, n, fromHint = false) => {
+    setHistory((h) => [...h, { grid: cloneGrid(g), notes: n.map((row) => row.map((s) => new Set(s))), fromHint }]);
   }, []);
 
+  // Reads history from the closure instead of a setHistory updater: updaters
+  // must stay pure (StrictMode runs them twice), and this one now also
+  // refunds a hint.
   const handleUndo = useCallback(() => {
-    setHistory((h) => {
-      if (h.length === 0) return h;
-      const last = h[h.length - 1];
-      setGrid(last.grid);
-      setNotesGrid(last.notes);
-      return h.slice(0, -1);
-    });
-  }, []);
+    if (won || history.length === 0) return; // a solved board is final
+    const last = history[history.length - 1];
+    setGrid(last.grid);
+    setNotesGrid(last.notes);
+    if (last.fromHint) setHintsLeft((h) => h + 1);
+    setHistory(history.slice(0, -1));
+  }, [history, won]);
 
   const isGiven = useCallback((r, c) => puzzle && puzzle[r][c] !== 0, [puzzle]);
+
+  // Shared by every path that can put the last correct digit on the board
+  // (a placed answer or a hint), so a win is always recorded the same way.
+  const finishIfSolved = useCallback(
+    (newGrid) => {
+      if (!boardIsComplete(newGrid)) return;
+      const allCorrect = newGrid.every((row, ri) => row.every((v, ci) => v === solution[ri][ci]));
+      if (!allCorrect) return;
+      setWon(true);
+      const diffKey = actualDifficulty || difficulty;
+      setStats((s) => recordWin(s, { difficulty: diffKey, seconds }));
+    },
+    [solution, actualDifficulty, difficulty, seconds]
+  );
 
   // Core placement logic, independent of how the cell/number were chosen.
   // Used by both keyboard entry (selected cell + mode) and mouse entry
@@ -673,6 +301,10 @@ function SudokuApp() {
         setNotesGrid(newNotes);
         return true;
       }
+
+      // Same digit already there: nothing changes, so no undo step and no
+      // extra mistake for re-clicking a wrong answer.
+      if (grid[r][c] === n) return true;
 
       pushHistory(grid, notesGrid);
       const newGrid = cloneGrid(grid);
@@ -693,28 +325,11 @@ function SudokuApp() {
 
       setGrid(newGrid);
       setNotesGrid(newNotes);
-
-      if (boardIsComplete(newGrid)) {
-        const allCorrect = newGrid.every((row, ri) => row.every((v, ci) => v === solution[ri][ci]));
-        if (allCorrect) {
-          setWon(true);
-          const stats = statsRef.current;
-          stats.gamesPlayed += 1;
-          stats.gamesWon += 1;
-          stats.currentStreak += 1;
-          stats.bestStreak = Math.max(stats.bestStreak, stats.currentStreak);
-          const diffKey = actualDifficulty || difficulty;
-          if (!stats.bestTimes[diffKey] || seconds < stats.bestTimes[diffKey]) {
-            stats.bestTimes[diffKey] = seconds;
-          }
-          stats.totalTimes[diffKey] = (stats.totalTimes[diffKey] || []).concat(seconds);
-          stats.completions[diffKey] = (stats.completions[diffKey] || 0) + 1;
-          setStatsVersion((v) => v + 1);
-        }
-      }
+      setStats(recordStart); // first answer on the board makes the game "played"
+      finishIfSolved(newGrid);
       return true;
     },
-    [grid, notesGrid, won, paused, isGiven, solution, autoCheck, pushHistory, actualDifficulty, difficulty, seconds]
+    [grid, notesGrid, won, paused, isGiven, solution, autoCheck, pushHistory, finishIfSolved]
   );
 
   // Keyboard-entry path: acts on the currently selected cell, using the
@@ -780,17 +395,26 @@ function SudokuApp() {
     if (!selected || !grid || won || paused) return;
     const [r, c] = selected;
     if (isGiven(r, c)) return;
-    pushHistory(grid, notesGrid);
-    const newGrid = cloneGrid(grid);
-    newGrid[r][c] = 0;
-    setGrid(newGrid);
+    // Erase the answer if there is one, otherwise the cell's pencil notes.
+    // An empty cell with no notes is left alone, with no undo step recorded.
+    if (grid[r][c] !== 0) {
+      pushHistory(grid, notesGrid);
+      const newGrid = cloneGrid(grid);
+      newGrid[r][c] = 0;
+      setGrid(newGrid);
+    } else if (notesGrid[r][c].size > 0) {
+      pushHistory(grid, notesGrid);
+      const newNotes = notesGrid.map((row) => row.map((s) => new Set(s)));
+      newNotes[r][c] = new Set();
+      setNotesGrid(newNotes);
+    }
   }, [selected, grid, notesGrid, won, paused, isGiven, pushHistory]);
 
   const useHint = useCallback(() => {
     if (!selected || !grid || hintsLeft <= 0 || won || paused) return;
     const [r, c] = selected;
     if (isGiven(r, c) || grid[r][c] === solution[r][c]) return;
-    pushHistory(grid, notesGrid);
+    pushHistory(grid, notesGrid, true);
     const newGrid = cloneGrid(grid);
     newGrid[r][c] = solution[r][c];
     const newNotes = notesGrid.map((row) => row.map((s) => new Set(s)));
@@ -799,17 +423,22 @@ function SudokuApp() {
     setGrid(newGrid);
     setNotesGrid(newNotes);
     setHintsLeft((h) => h - 1);
-
-    if (boardIsComplete(newGrid)) {
-      const allCorrect = newGrid.every((row, ri) => row.every((v, ci) => v === solution[ri][ci]));
-      if (allCorrect) setWon(true);
-    }
-  }, [selected, grid, notesGrid, hintsLeft, won, paused, isGiven, solution, pushHistory]);
+    setStats(recordStart); // a hint is an answer too
+    finishIfSolved(newGrid);
+  }, [selected, grid, notesGrid, hintsLeft, won, paused, isGiven, solution, pushHistory, finishIfSolved]);
 
   // keyboard support
   useEffect(() => {
     function onKey(e) {
-      if (screen !== "game" || won) return;
+      if (screen !== "game") return;
+      if (e.key === "Escape") {
+        // Disarm the pad digit and drop the selection -- the keyboard way out
+        // of number-first entry.
+        setSelectedDigit(null);
+        setSelected(null);
+        return;
+      }
+      if (won || paused) return; // the board is hidden while paused
       if (e.key >= "1" && e.key <= "9") placeNumber(parseInt(e.key, 10));
       else if (e.key === "Backspace" || e.key === "Delete" || e.key === "0") clearCell();
       else if (e.key === "ArrowUp" && selected) setSelected([(selected[0] + 8) % 9, selected[1]]);
@@ -819,9 +448,18 @@ function SudokuApp() {
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [screen, won, selected, placeNumber, clearCell]);
+  }, [screen, won, paused, selected, placeNumber, clearCell]);
 
   const selectedValue = selected && grid ? grid[selected[0]][selected[1]] : 0;
+
+  // Remaining count + dimmed/disabled per pad digit (rules in src/lib/pad.js).
+  const padState = useMemo(() => digitPadState(grid, solution, autoCheck), [grid, solution, autoCheck]);
+
+  // A digit whose button just became disabled can't be clicked to disarm it,
+  // so disarm it here; otherwise every cell click would keep placing it.
+  useEffect(() => {
+    if (selectedDigit && padState[selectedDigit].disabled) setSelectedDigit(null);
+  }, [selectedDigit, padState]);
 
   const cellState = useCallback(
     (r, c) => {
@@ -858,7 +496,7 @@ function SudokuApp() {
         fontScale={fontScale}
         onStart={startGame}
         loading={loading}
-        statsRef={statsRef}
+        stats={stats}
         onStats={() => setScreen("stats")}
         onSettings={() => {
           prevScreenRef.current = "menu";
@@ -869,7 +507,7 @@ function SudokuApp() {
   }
 
   if (screen === "stats") {
-    return <StatsScreen T={T} fontScale={fontScale} statsRef={statsRef} onBack={() => setScreen("menu")} />;
+    return <StatsScreen T={T} fontScale={fontScale} stats={stats} onBack={() => setScreen("menu")} />;
   }
 
   if (screen === "settings") {
@@ -912,14 +550,20 @@ function SudokuApp() {
       autoCheck={autoCheck}
       setAutoCheck={setAutoCheck}
       cellState={cellState}
+      padState={padState}
       isGiven={isGiven}
       placeNumber={placeNumber}
       clearCell={clearCell}
       useHint={useHint}
       handleUndo={handleUndo}
-      canUndo={history.length > 0}
+      canUndo={!won && history.length > 0}
       difficulty={actualDifficulty || difficulty}
-      onMenu={() => setScreen("menu")}
+      onMenu={() => {
+        // There is no way back into this game from the menu, so leaving
+        // a started, unfinished game here abandons it.
+        setStats(recordAbandon);
+        setScreen("menu");
+      }}
       onNewGame={() => startGame(difficulty)}
       onSettings={() => {
         prevScreenRef.current = "game";
@@ -934,9 +578,8 @@ function SudokuApp() {
    MENU SCREEN
    ============================================================ */
 
-function MenuScreen({ T, themeMode, setThemeMode, fontScale = 1, onStart, loading, statsRef, onStats, onSettings }) {
+function MenuScreen({ T, themeMode, setThemeMode, fontScale = 1, onStart, loading, stats, onStats, onSettings }) {
   const [hoverDiff, setHoverDiff] = useState(null);
-  const stats = statsRef.current;
   const fs = (px) => Math.round(px * fontScale);
 
   return (
@@ -1141,8 +784,7 @@ function MiniBoardArt({ T }) {
    STATS SCREEN
    ============================================================ */
 
-function StatsScreen({ T, fontScale = 1, statsRef, onBack }) {
-  const stats = statsRef.current;
+function StatsScreen({ T, fontScale = 1, stats, onBack }) {
   const winRate = stats.gamesPlayed ? Math.round((stats.gamesWon / stats.gamesPlayed) * 100) : 0;
   const fs = (px) => Math.round(px * fontScale);
 
@@ -1418,7 +1060,7 @@ function GameScreen(props) {
     grid, notesGrid, selected, setSelected,
     selectedDigit, onPadDigit, coarsePointer, handleCellClick, handleCellRightClick,
     mode, setMode, mistakes, hintsLeft, seconds, paused, setPaused, won,
-    autoCheck, setAutoCheck, cellState, isGiven,
+    autoCheck, setAutoCheck, cellState, padState, isGiven,
     placeNumber, clearCell, useHint, handleUndo, canUndo,
     difficulty, onMenu, onNewGame, onSettings,
   } = props;
@@ -1436,13 +1078,6 @@ function GameScreen(props) {
   // board. That is a pre-existing desktop quirk and it is preserved on purpose
   // -- fixing it would change the PC layout. It is a one-line fix when you want it.
   const rowWidthIdeal = Math.max(420, Math.round(BOARD_BASE_CELL * fontScale) * 9 + BOARD_CHROME);
-
-  const numberCounts = useMemo(() => {
-    const counts = Array(10).fill(0);
-    if (!grid) return counts;
-    grid.forEach((row) => row.forEach((v) => { if (v) counts[v]++; }));
-    return counts;
-  }, [grid]);
 
   if (!grid) return null;
 
@@ -1632,13 +1267,13 @@ function GameScreen(props) {
             would give ~33px targets. The 10th slot becomes Erase. */}
         <div className="lsg-row lsg-pad">
           {Array.from({ length: 9 }, (_, i) => i + 1).map((n) => {
-            const remaining = 9 - numberCounts[n];
+            const { remaining, dimmed, disabled } = padState[n];
             const armed = selectedDigit === n;
             return (
               <button
                 key={n}
                 className="numbtn"
-                disabled={remaining <= 0}
+                disabled={disabled}
                 aria-label={`Digit ${n}`}
                 onClick={(e) => {
                   e.stopPropagation();
@@ -1647,8 +1282,8 @@ function GameScreen(props) {
                 style={{
                   background: armed ? T.accent : T.paper,
                   border: `1px solid ${armed ? T.accent : T.border}`,
-                  color: armed ? "#fff" : remaining <= 0 ? T.textMuted : T.text,
-                  opacity: remaining <= 0 ? 0.3 : 1,
+                  color: armed ? "#fff" : dimmed ? T.textMuted : T.text,
+                  opacity: dimmed && !armed ? 0.3 : 1,
                 }}
               >
                 {n}
