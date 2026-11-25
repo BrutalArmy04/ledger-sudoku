@@ -19,10 +19,6 @@
     "test": "vitest run",
     "test:watch": "vitest"
   },
-  "dependencies": {
-    "react": "^19.2.7",
-    "react-dom": "^19.2.7"
-  },
   "devDependencies": {
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
@@ -32,6 +28,8 @@
     "electron": "^42.5.1",
     "electron-builder": "^26.15.3",
     "oxlint": "^1.69.0",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7",
     "vite": "^8.1.0",
     "vitest": "^4.1.10",
     "wait-on": "^9.0.10"
