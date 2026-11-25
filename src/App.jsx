@@ -1108,7 +1108,7 @@ function GameScreen(props) {
 
   if (!grid) return null;
 
-  const eraseDisabled = !selected || isGiven(selected[0], selected[1]);
+  const eraseDisabled = paused || !selected || isGiven(selected[0], selected[1]);
 
   return (
     <div
@@ -1186,7 +1186,11 @@ function GameScreen(props) {
           Mistakes: {mistakes}
         </div>
         <button
-          onClick={() => setPaused((p) => !p)}
+          onClick={(e) => {
+            // Pausing isn't a click away from the board: keep the selected cell.
+            e.stopPropagation();
+            setPaused((p) => !p);
+          }}
           className="iconbtn"
           style={{ background: "transparent", border: `1px solid ${T.border}`, borderRadius: 6, padding: "4px 10px", fontSize: fs(13), color: T.text }}
         >
@@ -1200,10 +1204,13 @@ function GameScreen(props) {
         <div className="lsg-boardstage">
           {paused && !won && (
             <div
+              onClick={(e) => e.stopPropagation()}
               style={{
                 position: "absolute",
                 inset: 0,
-                background: themeMode === "light" ? "rgba(247,246,243,0.92)" : "rgba(21,20,15,0.92)",
+                // Opaque: the clock is stopped, so the board must not be readable.
+                background: T.paper,
+                border: `3px solid ${T.boxBorder}`,
                 borderRadius: 10,
                 display: "flex",
                 alignItems: "center",
@@ -1283,11 +1290,12 @@ function GameScreen(props) {
             label={mode === "notes" ? "Notes ✓" : "Notes"}
             title="Toggles note vs. answer. Touch: tap ✎, then tap digits to pencil them in. Mouse: pick a number on the pad, then left-click a cell for an answer or right-click for a note."
             onClick={() => setMode((m) => (m === "notes" ? "normal" : "notes"))}
+            disabled={paused}
             active={mode === "notes"}
             icon="✎"
           />
           <ToolButton className="lsg-tool-erase" T={T} fontScale={fontScale} label="Erase" onClick={clearCell} disabled={eraseDisabled} icon="⌫" />
-          <ToolButton T={T} fontScale={fontScale} label={`Hint (${hintsLeft})`} onClick={useHint} disabled={hintsLeft <= 0 || !selected} icon="✺" />
+          <ToolButton T={T} fontScale={fontScale} label={`Hint (${hintsLeft})`} onClick={useHint} disabled={paused || hintsLeft <= 0 || !selected} icon="✺" />
         </div>
 
         {/* Number pad. 9 across on desktop; 5x2 on a phone, where 9 across
@@ -1300,7 +1308,7 @@ function GameScreen(props) {
               <button
                 key={n}
                 className="numbtn"
-                disabled={disabled}
+                disabled={disabled || paused}
                 aria-label={`Digit ${n}`}
                 onClick={(e) => {
                   e.stopPropagation();
@@ -1310,7 +1318,7 @@ function GameScreen(props) {
                   background: armed ? T.accent : T.paper,
                   border: `1px solid ${armed ? T.accent : T.border}`,
                   color: armed ? "#fff" : dimmed ? T.textMuted : T.text,
-                  opacity: dimmed && !armed ? 0.3 : 1,
+                  opacity: paused || (dimmed && !armed) ? 0.3 : 1,
                 }}
               >
                 {n}
