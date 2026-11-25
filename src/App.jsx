@@ -294,6 +294,9 @@ function SudokuApp() {
       if (isGiven(r, c)) return false;
 
       if (asNote) {
+        // A cell that holds a value takes no notes: they'd be hidden under
+        // the digit and resurface when it's erased.
+        if (grid[r][c] !== 0) return false;
         const newNotes = notesGrid.map((row) => row.map((s) => new Set(s)));
         pushHistory(grid, notesGrid);
         if (newNotes[r][c].has(n)) newNotes[r][c].delete(n);
@@ -366,6 +369,13 @@ function SudokuApp() {
   const handleCellClick = useCallback(
     (r, c) => {
       if (selectedDigit) {
+        // An armed digit only fills empty cells. Clicking a filled one just
+        // selects it, so a stray click can't overwrite an answer. To correct
+        // an entry, select the cell and type (or, on touch, tap a digit).
+        if (grid[r][c] !== 0) {
+          setSelected([r, c]);
+          return;
+        }
         // A finger has no right-click, so on touch the Notes toggle has to
         // govern the tap path. On a mouse the historical contract is preserved
         // exactly: left-click always answers, right-click always notes.
@@ -376,7 +386,7 @@ function SudokuApp() {
         setSelected([r, c]);
       }
     },
-    [selectedDigit, placeNumberAt, coarsePointer, mode]
+    [selectedDigit, grid, placeNumberAt, coarsePointer, mode]
   );
 
   const handleCellRightClick = useCallback(
