@@ -4,6 +4,7 @@ import { digitPadState } from "./lib/pad.js";
 import { recordStart, recordWin, recordAbandon, loadStats } from "./stats.js";
 import { updateStoredStats, watchStoredStats } from "./statsStorage.js";
 import { THEME, ACCENT_PRESETS, FONT_SCALES } from "./themes.js";
+import { normalizeSettings } from "./settings.js";
 
 /* ============================================================
    PERSISTENCE
@@ -88,13 +89,18 @@ function buildTheme(themeMode, accentKey) {
   return { ...base, ...preset[themeMode] };
 }
 
+// Stored settings, with every field checked against the known options.
+function readSettings() {
+  return normalizeSettings(loadSettings(), { themes: THEME, accents: ACCENT_PRESETS, fontScales: FONT_SCALES });
+}
+
 /* ============================================================
    MAIN APP
    ============================================================ */
 
 function SudokuApp() {
-  const [themeMode, setThemeMode] = useState(() => loadSettings()?.themeMode || "light");
-  const [prefs, setPrefs] = useState(() => loadSettings()?.prefs || { accent: "ink", fontScale: "standard" });
+  const [themeMode, setThemeMode] = useState(() => readSettings().themeMode);
+  const [prefs, setPrefs] = useState(() => readSettings().prefs);
   const T = useMemo(() => buildTheme(themeMode, prefs.accent), [themeMode, prefs.accent]);
   const fontScale = FONT_SCALES[prefs.fontScale]?.multiplier || 1;
   const coarsePointer = useCoarsePointer();
