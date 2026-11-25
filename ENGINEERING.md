@@ -149,3 +149,24 @@ failures are re-runnable without rebuilding. The macOS artifacts are
 unsigned — signing requires a paid Apple Developer account and
 notarization secrets, which is out of proportion for this project; the
 README documents the right-click → Open workaround instead.
+
+## 8. Known limitations
+
+**Stats across browser tabs.** Stats live in one localStorage key shared by
+every tab. Each update re-reads that key before writing, and other tabs
+refresh their display from `storage` events, so a stale tab no longer
+overwrites another tab's wins. What is still shared is the single
+`gameInProgress` flag: it records that *a* game is in progress, not whose.
+With two tabs open:
+
+- opening a second tab while the first is mid-game records that game as
+  abandoned, because the launch-time check can't tell a game that's live in
+  another tab from one left by closing the app; the first tab's next answer
+  then counts its game as played a second time;
+- when both tabs have a game in progress, one tab's Menu exit, new puzzle or
+  win also clears the other's flag, so games played can be off by one and a
+  streak can reset early.
+
+Two-tab play only happens in the browser version. This will be solved by
+per-game records when stats move to the API, not by adding game ids to
+localStorage.

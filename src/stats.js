@@ -84,7 +84,9 @@ function normalize(raw) {
   return s;
 }
 
-export function loadStats(storage, key) {
+// The stats as stored, repaired but with no load-time abandon. Used for
+// every read after launch, when a game in progress is a live one.
+export function readStats(storage, key) {
   let raw = null;
   try {
     const text = storage.getItem(key);
@@ -92,8 +94,12 @@ export function loadStats(storage, key) {
   } catch {
     raw = null;
   }
+  return normalize(raw);
+}
+
+export function loadStats(storage, key) {
   // A game still marked in progress was left by closing the app.
-  return recordAbandon(normalize(raw));
+  return recordAbandon(readStats(storage, key));
 }
 
 export function saveStats(storage, stats, key) {

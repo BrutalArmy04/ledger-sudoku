@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { cloneGrid, peers, generatePuzzle, boardIsComplete } from "./lib/sudoku.js";
 import { digitPadState } from "./lib/pad.js";
-import { recordStart, recordWin, recordAbandon, loadStats, saveStats } from "./stats.js";
+import { recordStart, recordWin, recordAbandon, loadStats } from "./stats.js";
+import { updateStoredStats, watchStoredStats } from "./statsStorage.js";
 
 /* ============================================================
    PERSISTENCE
@@ -213,9 +214,24 @@ function SudokuApp() {
   // progress when the app last closed into an abandon (see src/stats.js).
   const [stats, setStats] = useState(() => loadStats(browserStorage(), STORAGE_KEY_STATS));
 
+  // Every change goes through storage first (see src/statsStorage.js), so
+  // two open tabs don't overwrite each other's stats.
+  const updateStats = useCallback((change) => {
+    const storage = browserStorage();
+    // No storage, no other tab to merge with: keep stats in memory only.
+    if (!storage) return setStats(change);
+    setStats(updateStoredStats(storage, STORAGE_KEY_STATS, change));
+  }, []);
+
+  // Persist the launch-time abandon. Writes only if a game was left in progress.
+  useEffect(() => { updateStats(recordAbandon); }, [updateStats]);
+
+  // Another tab changed the stats: show them.
   useEffect(() => {
-    saveStats(browserStorage(), stats, STORAGE_KEY_STATS);
-  }, [stats]);
+    const storage = browserStorage();
+    if (!storage) return;
+    return watchStoredStats(window, storage, STORAGE_KEY_STATS, setStats);
+  }, []);
 
   const timerRef = useRef(null);
 
@@ -228,7 +244,7 @@ function SudokuApp() {
   }, [screen, paused, won]);
 
   const startGame = useCallback((diff) => {
-    setStats(recordAbandon); // no-op unless the current game was started and not won
+    updateStats(recordAbandon); // no-op unless the current game was started and not won
     setLoading(true);
     setTimeout(() => {
       const { puzzle: p, solved, difficulty: actual } = generatePuzzle(diff);
@@ -250,7 +266,7 @@ function SudokuApp() {
       setScreen("game");
       setLoading(false);
     }, 30);
-  }, []);
+  }, [updateStats]);
 
   // `fromHint` marks the step a hint made, so undoing it gives the hint back.
   const pushHistory = useCallback((g, n, fromHint = false) => {
@@ -261,13 +277,14 @@ function SudokuApp() {
   // must stay pure (StrictMode runs them twice), and this one now also
   // refunds a hint.
   const handleUndo = useCallback(() => {
-    if (won || history.length === 0) return; // a solved board is final
+    // A solved board is final, and a paused one is hidden.
+    if (won || paused || history.length === 0) return;
     const last = history[history.length - 1];
     setGrid(last.grid);
     setNotesGrid(last.notes);
     if (last.fromHint) setHintsLeft((h) => h + 1);
     setHistory(history.slice(0, -1));
-  }, [history, won]);
+  }, [history, won, paused]);
 
   const isGiven = useCallback((r, c) => puzzle && puzzle[r][c] !== 0, [puzzle]);
 
@@ -280,9 +297,9 @@ function SudokuApp() {
       if (!allCorrect) return;
       setWon(true);
       const diffKey = actualDifficulty || difficulty;
-      setStats((s) => recordWin(s, { difficulty: diffKey, seconds }));
+      updateStats((s) => recordWin(s, { difficulty: diffKey, seconds }));
     },
-    [solution, actualDifficulty, difficulty, seconds]
+    [solution, actualDifficulty, difficulty, seconds, updateStats]
   );
 
   // Core placement logic, independent of how the cell/number were chosen.
@@ -294,6 +311,9 @@ function SudokuApp() {
       if (isGiven(r, c)) return false;
 
       if (asNote) {
+        // A cell that holds a value takes no notes: they'd be hidden under
+        // the digit and resurface when it's erased.
+        if (grid[r][c] !== 0) return false;
         const newNotes = notesGrid.map((row) => row.map((s) => new Set(s)));
         pushHistory(grid, notesGrid);
         if (newNotes[r][c].has(n)) newNotes[r][c].delete(n);
@@ -325,11 +345,11 @@ function SudokuApp() {
 
       setGrid(newGrid);
       setNotesGrid(newNotes);
-      setStats(recordStart); // first answer on the board makes the game "played"
+      updateStats(recordStart); // first answer on the board makes the game "played"
       finishIfSolved(newGrid);
       return true;
     },
-    [grid, notesGrid, won, paused, isGiven, solution, autoCheck, pushHistory, finishIfSolved]
+    [grid, notesGrid, won, paused, isGiven, solution, autoCheck, pushHistory, finishIfSolved, updateStats]
   );
 
   // Keyboard-entry path: acts on the currently selected cell, using the
@@ -366,6 +386,13 @@ function SudokuApp() {
   const handleCellClick = useCallback(
     (r, c) => {
       if (selectedDigit) {
+        // An armed digit only fills empty cells. Clicking a filled one just
+        // selects it, so a stray click can't overwrite an answer. To correct
+        // an entry, select the cell and type (or, on touch, tap a digit).
+        if (grid[r][c] !== 0) {
+          setSelected([r, c]);
+          return;
+        }
         // A finger has no right-click, so on touch the Notes toggle has to
         // govern the tap path. On a mouse the historical contract is preserved
         // exactly: left-click always answers, right-click always notes.
@@ -376,7 +403,7 @@ function SudokuApp() {
         setSelected([r, c]);
       }
     },
-    [selectedDigit, placeNumberAt, coarsePointer, mode]
+    [selectedDigit, grid, placeNumberAt, coarsePointer, mode]
   );
 
   const handleCellRightClick = useCallback(
@@ -423,9 +450,9 @@ function SudokuApp() {
     setGrid(newGrid);
     setNotesGrid(newNotes);
     setHintsLeft((h) => h - 1);
-    setStats(recordStart); // a hint is an answer too
+    updateStats(recordStart); // a hint is an answer too
     finishIfSolved(newGrid);
-  }, [selected, grid, notesGrid, hintsLeft, won, paused, isGiven, solution, pushHistory, finishIfSolved]);
+  }, [selected, grid, notesGrid, hintsLeft, won, paused, isGiven, solution, pushHistory, finishIfSolved, updateStats]);
 
   // keyboard support
   useEffect(() => {
@@ -556,12 +583,12 @@ function SudokuApp() {
       clearCell={clearCell}
       useHint={useHint}
       handleUndo={handleUndo}
-      canUndo={!won && history.length > 0}
+      canUndo={!won && !paused && history.length > 0}
       difficulty={actualDifficulty || difficulty}
       onMenu={() => {
         // There is no way back into this game from the menu, so leaving
         // a started, unfinished game here abandons it.
-        setStats(recordAbandon);
+        updateStats(recordAbandon);
         setScreen("menu");
       }}
       onNewGame={() => startGame(difficulty)}
