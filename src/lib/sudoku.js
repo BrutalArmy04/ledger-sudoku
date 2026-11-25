@@ -255,12 +255,19 @@ export function logicalSolve(grid) {
   return { solved: isSolved(), techniques };
 }
 
+// minClues is the dig floor: generatePuzzleOnce removes clues until the
+// puzzle has this many or no clue can be removed without losing uniqueness,
+// whichever comes first. Master's floor (17, the fewest any uniquely
+// solvable Sudoku can have) is in practice never reached, so a Master dig
+// always ends at the first puzzle with no removable clue. The label comes
+// from gradeDifficulty, not from the clue count: Master means the logical
+// solver got stuck, or there are fewer clues than Expert's floor.
 export const DIFFICULTY_TARGETS = {
-  Easy: { minClues: 38, maxClues: 45 },
-  Medium: { minClues: 32, maxClues: 37 },
-  Hard: { minClues: 28, maxClues: 31 },
-  Expert: { minClues: 24, maxClues: 27 },
-  Master: { minClues: 17, maxClues: 23 },
+  Easy: { minClues: 38 },
+  Medium: { minClues: 32 },
+  Hard: { minClues: 28 },
+  Expert: { minClues: 24 },
+  Master: { minClues: 17 },
 };
 
 // Tiers are cumulative: each tier's technique set is a superset of easier tiers.
