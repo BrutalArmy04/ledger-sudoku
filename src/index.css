@@ -17,6 +17,15 @@ html, body {
   min-height: 100dvh;  /* iOS Safari: 100vh is measured with the URL bar COLLAPSED,
                           so it is taller than what you can actually see. 100dvh
                           tracks the visible viewport. Identical to 100vh on desktop. */
+  display: flex;
+  flex-direction: column;
+}
+
+/* Each screen is #root's only child. Growing it to fill #root is what carries
+   its background to the bottom of a tall window; a percentage min-height
+   can't, because #root has no definite height to take a percentage of. */
+#root > * {
+  flex-grow: 1;
 }
 
 /* --------------------------------------------------------------------------
