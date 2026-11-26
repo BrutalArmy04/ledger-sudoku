@@ -3,6 +3,8 @@ import { cloneGrid, peers, generatePuzzle, boardIsComplete } from "./lib/sudoku.
 import { digitPadState } from "./lib/pad.js";
 import { recordStart, recordWin, recordAbandon, loadStats } from "./stats.js";
 import { updateStoredStats, watchStoredStats } from "./statsStorage.js";
+import { THEME, ACCENT_PRESETS, FONT_SCALES } from "./themes.js";
+import { normalizeSettings } from "./settings.js";
 
 /* ============================================================
    PERSISTENCE
@@ -75,97 +77,11 @@ function formatTime(totalSeconds) {
   return `${m}:${s.toString().padStart(2, "0")}`;
 }
 
-const THEME = {
-  light: {
-    bg: "#F7F6F3",
-    paper: "#FFFFFF",
-    ledger: "#E7E4DC",
-    text: "#1C1B19",
-    textMuted: "#6B6660",
-    accent: "#2B4570",
-    accentSoft: "#D8E1EC",
-    related: "#EDF1F6",
-    sameNum: "#E3E9F2",
-    error: "#B5524A",
-    errorSoft: "#F5E2E0",
-    amber: "#C9A227",
-    border: "#C9C4B8",
-    boxBorder: "#2B4570",
-    given: "#1C1B19",
-    userNum: "#2B4570",
-    note: "#8B9DAF",
-  },
-  dark: {
-    bg: "#15140F",
-    paper: "#1C1B19",
-    ledger: "#262420",
-    text: "#EDEAE3",
-    textMuted: "#948E83",
-    accent: "#6E8CB8",
-    accentSoft: "#26344A",
-    related: "#23282F",
-    sameNum: "#2A3848",
-    error: "#D1736B",
-    errorSoft: "#3A2420",
-    amber: "#D9B64A",
-    border: "#3A3631",
-    boxBorder: "#6E8CB8",
-    given: "#EDEAE3",
-    userNum: "#8FAAD1",
-    note: "#7C8FA6",
-  },
-};
-
-// Accent presets only override the small set of theme keys tied to the
-// "ink" color — everything else (paper, background, borders, neutral
-// text) stays as defined in THEME above, for both light and dark mode.
-const ACCENT_PRESETS = {
-  ink: {
-    label: "Ink Blue",
-    swatch: "#2B4570",
-    light: { accent: "#2B4570", accentSoft: "#D8E1EC", sameNum: "#E3E9F2", boxBorder: "#2B4570", userNum: "#2B4570" },
-    dark: { accent: "#6E8CB8", accentSoft: "#26344A", sameNum: "#2A3848", boxBorder: "#6E8CB8", userNum: "#8FAAD1" },
-  },
-  forest: {
-    label: "Forest",
-    swatch: "#2F5233",
-    light: { accent: "#2F5233", accentSoft: "#DCE8DC", sameNum: "#E1ECE1", boxBorder: "#2F5233", userNum: "#2F5233" },
-    dark: { accent: "#6FA37A", accentSoft: "#233A28", sameNum: "#27402C", boxBorder: "#6FA37A", userNum: "#8FC29B" },
-  },
-  burgundy: {
-    label: "Burgundy",
-    swatch: "#7A2E3A",
-    light: { accent: "#7A2E3A", accentSoft: "#EDDCDF", sameNum: "#F0E2E4", boxBorder: "#7A2E3A", userNum: "#7A2E3A" },
-    dark: { accent: "#C77B89", accentSoft: "#3A2228", sameNum: "#40262C", boxBorder: "#C77B89", userNum: "#D699A4" },
-  },
-  plum: {
-    label: "Plum",
-    swatch: "#4B3F72",
-    light: { accent: "#4B3F72", accentSoft: "#E1DCEE", sameNum: "#E6E1F0", boxBorder: "#4B3F72", userNum: "#4B3F72" },
-    dark: { accent: "#9C8FC9", accentSoft: "#2E2745", sameNum: "#332B4C", boxBorder: "#9C8FC9", userNum: "#B3A8D9" },
-  },
-  slate: {
-    label: "Slate",
-    swatch: "#3F5663",
-    light: { accent: "#3F5663", accentSoft: "#DCE5E9", sameNum: "#E2EAEC", boxBorder: "#3F5663", userNum: "#3F5663" },
-    dark: { accent: "#7FA2B3", accentSoft: "#27343C", sameNum: "#2B3A42", boxBorder: "#7FA2B3", userNum: "#9CBAC8" },
-  },
-};
-
 // Base (fontScale === 1) board cell size in px. GameScreen needs this too,
 // to size the rows above the board so they stay aligned with its new width.
 const BOARD_BASE_CELL = 56;
 // Padding (8px * 2) + outer border (1px * 2) added around the grid by Board.
 const BOARD_CHROME = 18;
-
-// Font/cell scale: controls both the board's cell size and the font size
-// of digits, notes, and the number pad, so larger text always comes with
-// a larger tap target.
-const FONT_SCALES = {
-  standard: { label: "Standard", multiplier: 1 },
-  large: { label: "Large", multiplier: 1.15 },
-  xlarge: { label: "Extra Large", multiplier: 1.3 },
-};
 
 function buildTheme(themeMode, accentKey) {
   const base = THEME[themeMode];
@@ -173,13 +89,18 @@ function buildTheme(themeMode, accentKey) {
   return { ...base, ...preset[themeMode] };
 }
 
+// Stored settings, with every field checked against the known options.
+function readSettings() {
+  return normalizeSettings(loadSettings(), { themes: THEME, accents: ACCENT_PRESETS, fontScales: FONT_SCALES });
+}
+
 /* ============================================================
    MAIN APP
    ============================================================ */
 
 function SudokuApp() {
-  const [themeMode, setThemeMode] = useState(() => loadSettings()?.themeMode || "light");
-  const [prefs, setPrefs] = useState(() => loadSettings()?.prefs || { accent: "ink", fontScale: "standard" });
+  const [themeMode, setThemeMode] = useState(() => readSettings().themeMode);
+  const [prefs, setPrefs] = useState(() => readSettings().prefs);
   const T = useMemo(() => buildTheme(themeMode, prefs.accent), [themeMode, prefs.accent]);
   const fontScale = FONT_SCALES[prefs.fontScale]?.multiplier || 1;
   const coarsePointer = useCoarsePointer();
@@ -1108,7 +1029,7 @@ function GameScreen(props) {
 
   if (!grid) return null;
 
-  const eraseDisabled = !selected || isGiven(selected[0], selected[1]);
+  const eraseDisabled = paused || !selected || isGiven(selected[0], selected[1]);
 
   return (
     <div
@@ -1186,7 +1107,11 @@ function GameScreen(props) {
           Mistakes: {mistakes}
         </div>
         <button
-          onClick={() => setPaused((p) => !p)}
+          onClick={(e) => {
+            // Pausing isn't a click away from the board: keep the selected cell.
+            e.stopPropagation();
+            setPaused((p) => !p);
+          }}
           className="iconbtn"
           style={{ background: "transparent", border: `1px solid ${T.border}`, borderRadius: 6, padding: "4px 10px", fontSize: fs(13), color: T.text }}
         >
@@ -1200,10 +1125,13 @@ function GameScreen(props) {
         <div className="lsg-boardstage">
           {paused && !won && (
             <div
+              onClick={(e) => e.stopPropagation()}
               style={{
                 position: "absolute",
                 inset: 0,
-                background: themeMode === "light" ? "rgba(247,246,243,0.92)" : "rgba(21,20,15,0.92)",
+                // Opaque: the clock is stopped, so the board must not be readable.
+                background: T.paper,
+                border: `3px solid ${T.boxBorder}`,
                 borderRadius: 10,
                 display: "flex",
                 alignItems: "center",
@@ -1283,11 +1211,12 @@ function GameScreen(props) {
             label={mode === "notes" ? "Notes ✓" : "Notes"}
             title="Toggles note vs. answer. Touch: tap ✎, then tap digits to pencil them in. Mouse: pick a number on the pad, then left-click a cell for an answer or right-click for a note."
             onClick={() => setMode((m) => (m === "notes" ? "normal" : "notes"))}
+            disabled={paused}
             active={mode === "notes"}
             icon="✎"
           />
           <ToolButton className="lsg-tool-erase" T={T} fontScale={fontScale} label="Erase" onClick={clearCell} disabled={eraseDisabled} icon="⌫" />
-          <ToolButton T={T} fontScale={fontScale} label={`Hint (${hintsLeft})`} onClick={useHint} disabled={hintsLeft <= 0 || !selected} icon="✺" />
+          <ToolButton T={T} fontScale={fontScale} label={`Hint (${hintsLeft})`} onClick={useHint} disabled={paused || hintsLeft <= 0 || !selected} icon="✺" />
         </div>
 
         {/* Number pad. 9 across on desktop; 5x2 on a phone, where 9 across
@@ -1300,7 +1229,7 @@ function GameScreen(props) {
               <button
                 key={n}
                 className="numbtn"
-                disabled={disabled}
+                disabled={disabled || paused}
                 aria-label={`Digit ${n}`}
                 onClick={(e) => {
                   e.stopPropagation();
@@ -1310,7 +1239,7 @@ function GameScreen(props) {
                   background: armed ? T.accent : T.paper,
                   border: `1px solid ${armed ? T.accent : T.border}`,
                   color: armed ? "#fff" : dimmed ? T.textMuted : T.text,
-                  opacity: dimmed && !armed ? 0.3 : 1,
+                  opacity: paused || (dimmed && !armed) ? 0.3 : 1,
                 }}
               >
                 {n}
